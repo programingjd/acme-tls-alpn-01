@@ -1,4 +1,5 @@
 use crate::client::{HttpClient, Response};
+use crate::errors::Error::NewNonce;
 use crate::errors::{Error, Result};
 use serde::Deserialize;
 
@@ -26,22 +27,45 @@ impl Directory {
             .get_request(directory_url)
             .await
             .map_err(|_| Error::fetch_directory_error(directory_url))?;
-        response
-            .body_as_json::<Directory>()
-            .await
-            .map_err(|_| Error::fetch_directory_error(directory_url))
+        if response.is_success() {
+            response
+                .body_as_json::<Directory>()
+                .await
+                .map_err(|_| Error::fetch_directory_error(directory_url))
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::fetch_directory_error(directory_url))
+        }
     }
     pub(crate) async fn new_nonce<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         &self,
         client: &C,
     ) -> Result<String> {
         let nounce_url = &self.new_nonce;
-        client
+        let response = client
             .get_request(nounce_url)
             .await
-            .ok()
-            .and_then(|response| response.header_value("replay-nonce"))
-            .ok_or(Error::NewNonce)
+            .map_err(|_| Error::NewNonce)?;
+        if response.is_success() {
+            let nonce = response
+                .header_value("replay-nonce")
+                .ok_or(Error::NewNonce)?;
+            let _ = response.body_as_bytes();
+            Ok(nonce)
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(NewNonce)
+        }
     }
 }
 

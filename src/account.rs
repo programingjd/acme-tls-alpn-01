@@ -86,15 +86,23 @@ impl Account {
             .await
             .map_err(|_| Error::NewAccount)?;
         if response.is_success() {
-            response
+            let account = response
                 .header_value("location")
                 .map(|kid| Self {
                     keypair,
                     pkcs8,
                     kid,
                 })
-                .ok_or(Error::NewAccount)
+                .ok_or(Error::NewAccount)?;
+            let _ = response.body_as_bytes();
+            Ok(account)
         } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
             Err(Error::NewAccount)
         }
     }
@@ -158,7 +166,7 @@ mod test {
         )
         .await
         .unwrap();
-        let _ = Account::from("contact@example.com", &directory, &acme.client)
+        let _ = Account::from("void@programingjd.me", &directory, &acme.client)
             .await
             .unwrap();
     }
