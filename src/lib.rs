@@ -2,7 +2,9 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Result;
 use std::error::Error;
+use std::marker::PhantomData;
 
+mod account;
 mod client;
 mod directory;
 mod errors;
@@ -20,6 +22,8 @@ where
     R: Response<E>,
     C: HttpClient<R, E>,
 {
+    _e: PhantomData<E>,
+    _r: PhantomData<R>,
     client: C,
 }
 

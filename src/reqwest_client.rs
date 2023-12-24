@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Borrow;
 
 impl HttpClient<reqwest::Response, reqwest::Error> for Client {
-    async fn get(&self, url: impl AsRef<str>) -> Result<reqwest::Response, reqwest::Error> {
+    async fn get_request(&self, url: impl AsRef<str>) -> Result<reqwest::Response, reqwest::Error> {
         self.get(url.as_ref()).send().await
     }
 }
@@ -36,4 +36,17 @@ impl Default for Acme<reqwest::Response, reqwest::Error, Client> {
 
 fn init_client() -> Client {
     Client::default()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_text() {
+        let client = init_client();
+        let response = client.get_request("https://www.example.com").await.unwrap();
+        let text = response.text().await.unwrap();
+        assert!(text.starts_with("<!doctype html>"))
+    }
 }

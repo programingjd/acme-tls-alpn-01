@@ -11,6 +11,6 @@ impl LetsEncrypt {
         }
     }
     pub fn directory_url(&self) -> String {
-        format!("https://{}/directory)", self.domain())
+        format!("https://{}/directory", self.domain())
     }
 }

@@ -2,9 +2,10 @@ use crate::Acme;
 use serde::de::DeserializeOwned;
 use std::borrow::Borrow;
 use std::error::Error;
+use std::marker::PhantomData;
 
 pub trait HttpClient<R: Response<E>, E: Error> {
-    async fn get(&self, url: impl AsRef<str>) -> Result<R, E>;
+    async fn get_request(&self, url: impl AsRef<str>) -> Result<R, E>;
 }
 
 pub trait Response<E: Error> {
@@ -16,6 +17,10 @@ pub trait Response<E: Error> {
 
 impl<C: HttpClient<R, E>, R: Response<E>, E: Error> Acme<R, E, C> {
     pub fn new(client: C) -> Self {
-        Self { client }
+        Self {
+            client,
+            _e: PhantomData,
+            _r: PhantomData,
+        }
     }
 }
