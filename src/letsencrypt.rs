@@ -3,6 +3,20 @@ pub enum LetsEncrypt {
     StagingEnvironment,
 }
 
+#[cfg(debug_assertions)]
+impl Default for LetsEncrypt {
+    fn default() -> Self {
+        Self::StagingEnvironment
+    }
+}
+
+#[cfg(not(debug_assertions))]
+impl Default for LetsEncrypt {
+    fn default() -> Self {
+        Self::ProductionEnvironment
+    }
+}
+
 impl LetsEncrypt {
     pub fn domain(&self) -> &'static str {
         match self {

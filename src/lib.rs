@@ -1,3 +1,4 @@
+use crate::account::Account;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Result;
@@ -8,6 +9,7 @@ mod account;
 mod client;
 mod directory;
 mod errors;
+mod jose;
 mod letsencrypt;
 
 #[cfg(feature = "reqwest")]
@@ -40,5 +42,12 @@ where
 impl<C: HttpClient<R, E>, R: Response<E>, E: Error> Acme<R, E, C> {
     pub async fn directory(&self, directory_url: impl AsRef<str>) -> Result<Directory> {
         Directory::from(directory_url, &self.client).await
+    }
+    pub async fn new_account(
+        &self,
+        contact_email: impl AsRef<str>,
+        directory: &Directory,
+    ) -> Result<Account> {
+        Account::from(contact_email, directory, &self.client).await
     }
 }

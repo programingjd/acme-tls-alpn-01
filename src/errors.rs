@@ -5,7 +5,9 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     FetchDirectory { url: String },
-    GenerateAccountKeyPair,
+    NewNonce,
+    NewAccount,
+    DeserializeAccount,
 }
 
 impl Error {
@@ -20,8 +22,14 @@ impl Display for Error {
             Error::FetchDirectory { ref url } => {
                 write!(f, "Could not fetch ACME directory at {url}")
             }
-            Error::GenerateAccountKeyPair => {
-                write!(f, "Could not generate account key pair")
+            Error::NewNonce => {
+                write!(f, "Could not get a new nonce")
+            }
+            Error::NewAccount => {
+                write!(f, "Could not get or create account")
+            }
+            Error::DeserializeAccount => {
+                write!(f, "Could not deserialize account")
             }
         }
     }
