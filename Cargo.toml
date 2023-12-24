@@ -1,0 +1,27 @@
+[package]
+name = "acme-tls-alpn-01"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1.0"
+
+[dependencies.reqwest]
+optional = true
+version = "0.11"
+default-features = false
+features = ["json"]
+
+[dev-dependencies.tokio]
+version = "1.35"
+default-features = false
+features = ["rt-multi-thread", "macros"]
+
+[features]
+default = ["reqwest"]
+reqwest = ["dep:reqwest"]
