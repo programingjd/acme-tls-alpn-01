@@ -11,36 +11,29 @@ pub enum Error {
     Csr { domains: Vec<String> },
     NewOrder,
     InvalidOrder { domains: Vec<String> },
-}
-
-impl Error {
-    pub(crate) fn fetch_directory_error(url: impl Into<String>) -> Self {
-        Error::FetchDirectory { url: url.into() }
-    }
-    pub(crate) fn csr_error(domains: Vec<String>) -> Self {
-        Error::Csr { domains }
-    }
+    GetAuthorization,
+    InvalidAuthorization,
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::FetchDirectory { ref url } => {
-                write!(f, "Could not fetch ACME directory at {url}")
+                write!(f, "could not fetch ACME directory at {url}")
             }
             Error::NewNonce => {
-                write!(f, "Could not get a new nonce")
+                write!(f, "could not get a new nonce")
             }
             Error::NewAccount => {
-                write!(f, "Could not get or create account")
+                write!(f, "could not get or create account")
             }
             Error::DeserializeAccount => {
-                write!(f, "Could not deserialize account")
+                write!(f, "could not deserialize account")
             }
             Error::Csr { ref domains } => {
                 write!(
                     f,
-                    "Could not generate CSR for domains: {}",
+                    "could not generate CSR for domains: {}",
                     domains
                         .iter()
                         .map(|it| format!("\"{}\"", it))
@@ -49,18 +42,24 @@ impl Display for Error {
                 )
             }
             Error::NewOrder => {
-                write!(f, "Could not get or create new order")
+                write!(f, "could not get or create new order")
             }
             Error::InvalidOrder { ref domains } => {
                 write!(
                     f,
-                    "Invalid order for domains: {}",
+                    "invalid order for domains: {}",
                     domains
                         .iter()
                         .map(|it| format!("\"{}\"", it))
                         .collect::<Vec<String>>()
                         .join(", ")
                 )
+            }
+            Error::GetAuthorization => {
+                write!(f, "could not get authorization challenges")
+            }
+            Error::InvalidAuthorization => {
+                write!(f, "invalid authorization")
             }
         }
     }

@@ -11,7 +11,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 #[derive(Serialize)]
-pub struct Account {
+pub struct AccountMaterial {
     #[serde(skip_serializing)]
     pub(crate) keypair: EcdsaKeyPair,
     #[serde(with = "base64")]
@@ -20,30 +20,34 @@ pub struct Account {
 }
 
 #[derive(Deserialize)]
-struct PackedAccount {
+struct PackedAccountMaterial {
     #[serde(with = "base64")]
     pkcs8: Vec<u8>,
     kid: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+pub(crate) struct Account {
+    contact: Vec<String>,
+    #[serde(rename = "termsOfServiceAgreed")]
+    terms_of_service_agreed: bool,
+    #[serde(flatten)]
+    status: AccountStatus,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(tag = "status")]
-pub(crate) enum AcmeAccount {
+pub(crate) enum AccountStatus {
     #[serde(rename = "valid")]
-    Valid {
-        contact: Vec<String>,
-        #[serde(rename = "termsOfServiceAgreed")]
-        terms_of_service_agreed: bool,
-        orders: String,
-    },
+    Valid,
     #[serde(rename = "deactivated")]
     Deactivated {},
     #[serde(rename = "revoked")]
     Revoked {},
 }
 
-impl From<PackedAccount> for Account {
-    fn from(value: PackedAccount) -> Self {
+impl From<PackedAccountMaterial> for AccountMaterial {
+    fn from(value: PackedAccountMaterial) -> Self {
         Self {
             keypair: Self::keypair_from_pkcs8(&value.pkcs8),
             pkcs8: value.pkcs8,
@@ -52,8 +56,8 @@ impl From<PackedAccount> for Account {
     }
 }
 
-impl From<Account> for PackedAccount {
-    fn from(value: Account) -> Self {
+impl From<AccountMaterial> for PackedAccountMaterial {
+    fn from(value: AccountMaterial) -> Self {
         Self {
             pkcs8: value.pkcs8,
             kid: value.kid,
@@ -61,23 +65,23 @@ impl From<Account> for PackedAccount {
     }
 }
 
-impl Display for Account {
+impl Display for AccountMaterial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", serde_json::to_string(&self).unwrap())
     }
 }
 
-impl FromStr for Account {
+impl FromStr for AccountMaterial {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Account> {
-        serde_json::from_str::<PackedAccount>(s)
+    fn from_str(s: &str) -> Result<AccountMaterial> {
+        serde_json::from_str::<PackedAccountMaterial>(s)
             .map(|it| it.into())
             .map_err(|_| DeserializeAccount)
     }
 }
 
-impl Account {
+impl AccountMaterial {
     pub(crate) async fn from<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         contact_email: impl AsRef<str>,
         directory: &Directory,
@@ -104,11 +108,11 @@ impl Account {
         if response.is_success() {
             let kid = response.header_value("location").ok_or(Error::NewAccount)?;
             let acme_account = response
-                .body_as_json::<AcmeAccount>()
+                .body_as_json::<AccountStatus>()
                 .await
                 .map_err(|_| Error::NewAccount)?;
             match acme_account {
-                AcmeAccount::Valid { orders, .. } => Ok(Account {
+                AccountStatus::Valid { .. } => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
                     kid,
@@ -160,20 +164,42 @@ mod test {
     use crate::Acme;
 
     #[test]
-    fn test_pcks8() {
-        let pkcs8 = Account::generate_pkcs8();
-        let keypair = Account::keypair_from_pkcs8(&pkcs8);
+    fn test_account_material_serialization() {
+        let pkcs8 = AccountMaterial::generate_pkcs8();
+        let keypair = AccountMaterial::keypair_from_pkcs8(&pkcs8);
         let kid = "kid";
-        let account = Account {
+        let original = AccountMaterial {
             pkcs8,
             keypair,
             kid: kid.into(),
         };
-        let json = account.to_string();
+        let json = original.to_string();
         println!("{json}");
-        let deserialized = Account::from_str(&json).unwrap();
+        let deserialized = AccountMaterial::from_str(&json).unwrap();
         assert_eq!(deserialized.kid, kid);
-        let _ = Account::keypair_from_pkcs8(&deserialized.pkcs8);
+        assert_eq!(&original.pkcs8, &deserialized.pkcs8);
+        let _ = AccountMaterial::keypair_from_pkcs8(&deserialized.pkcs8);
+    }
+
+    #[test]
+    fn test_account_deserialization() {
+        let json = serde_json::to_string_pretty(&json!({
+            "status": "valid",
+            "contact": [
+                "mailto:cert-admin@example.org",
+                "mailto:admin@example.org"
+            ],
+            "termsOfServiceAgreed": true,
+            "orders": "https://example.com/acme/orders/rzGoeA"
+        }))
+        .unwrap();
+        println!("{json}");
+        let deserialized = serde_json::from_str::<Account>(json.as_str()).unwrap();
+        assert_eq!(deserialized.status, AccountStatus::Valid);
+        assert_eq!(deserialized.contact.len(), 2);
+        assert_eq!(deserialized.contact[0], "mailto:cert-admin@example.org");
+        assert_eq!(deserialized.contact[1], "mailto:admin@example.org");
+        assert!(deserialized.terms_of_service_agreed);
     }
 
     #[tokio::test]
@@ -185,7 +211,7 @@ mod test {
         )
         .await
         .unwrap();
-        let _ = Account::from("void@programingjd.me", &directory, &acme.client)
+        let _ = AccountMaterial::from("void@programingjd.me", &directory, &acme.client)
             .await
             .unwrap();
     }

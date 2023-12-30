@@ -1,20 +1,21 @@
-use crate::account::Account;
+use crate::account::AccountMaterial;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
-use crate::errors::Error::InvalidOrder;
 use crate::errors::Result;
-use crate::order::{Identifier, Order};
+use crate::order::LocatedOrder;
 use std::error::Error;
 use std::marker::PhantomData;
 
 mod account;
+mod authorization;
+mod challenge;
 mod client;
 mod directory;
 mod errors;
 mod jose;
-mod letsencrypt;
-
+pub mod letsencrypt;
 mod order;
+pub mod resolver;
 
 #[cfg(feature = "reqwest")]
 mod reqwest_client;
@@ -53,34 +54,18 @@ impl<C: HttpClient<R, E>, R: Response<E>, E: Error> Acme<R, E, C> {
         &self,
         contact_email: impl AsRef<str>,
         directory: &Directory,
-    ) -> Result<Account> {
-        Account::from(contact_email, directory, &self.client).await
+    ) -> Result<AccountMaterial> {
+        AccountMaterial::from(contact_email, directory, &self.client).await
     }
     pub async fn request_certificates(
         &self,
         domain_names: impl Iterator<Item = impl Into<String>>,
-        account: &Account,
+        account: &AccountMaterial,
         directory: &Directory,
     ) -> Result<()> {
-        match Order::new_order(domain_names, account, directory, &self.client).await? {
-            Order::Invalid { identifiers, .. } => Err(InvalidOrder {
-                domains: identifiers
-                    .iter()
-                    .map(|it| match it {
-                        Identifier::Dns(name) => name.clone(),
-                    })
-                    .collect(),
-            }),
-            Order::Ready { finalize, .. } => self.finalize(finalize).await,
-            Order::Valid { certificate, .. } => self.download_certificate(certificate).await,
-            // Order::Processing { .. } =>
-            _ => Ok(()),
-        }
-    }
-    async fn finalize(&self, url: String) -> Result<()> {
-        todo!()
-    }
-    async fn download_certificate(&self, url: String) -> Result<()> {
-        todo!()
+        LocatedOrder::new_order(domain_names, account, directory, &self.client)
+            .await?
+            .process(account, directory, &self.client)
+            .await
     }
 }

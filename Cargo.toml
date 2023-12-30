@@ -7,19 +7,26 @@ rust-version = "1.75"
 [dependencies.ring]
 version = "0.17"
 default-features = false
-features = []
+features = ["std","alloc"]
 
 [dependencies.base64]
 version = "0.21"
 default-features = false
-features = ["std"]
+features = ["std","alloc"]
 
 [dependencies.serde]
 version = "1.0"
-features = ["derive"]
+features = ["std","alloc","derive"]
 
 [dependencies.serde_json]
 version = "1.0"
+default-features = false
+features = ["std","alloc"]
+
+[dependencies.futures]
+version = "0.3"
+default-features = false
+features = ["std","alloc"]
 
 [dependencies.rcgen]
 version = "0.12"

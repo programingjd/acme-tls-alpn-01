@@ -1,5 +1,4 @@
 use crate::client::{HttpClient, Response};
-use crate::errors::Error::NewNonce;
 use crate::errors::{Error, Result};
 use serde::Deserialize;
 
@@ -23,15 +22,20 @@ impl Directory {
         client: &C,
     ) -> Result<Self> {
         let directory_url = directory_url.as_ref();
-        let response = client
-            .get_request(directory_url)
-            .await
-            .map_err(|_| Error::fetch_directory_error(directory_url))?;
+        let response =
+            client
+                .get_request(directory_url)
+                .await
+                .map_err(|_| Error::FetchDirectory {
+                    url: directory_url.to_string(),
+                })?;
         if response.is_success() {
             response
                 .body_as_json::<Directory>()
                 .await
-                .map_err(|_| Error::fetch_directory_error(directory_url))
+                .map_err(|_| Error::FetchDirectory {
+                    url: directory_url.to_string(),
+                })
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
@@ -39,7 +43,9 @@ impl Directory {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::fetch_directory_error(directory_url))
+            Err(Error::FetchDirectory {
+                url: directory_url.to_string(),
+            })
         }
     }
     pub(crate) async fn new_nonce<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
@@ -64,15 +70,44 @@ impl Directory {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(NewNonce)
+            Err(Error::NewNonce)
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::directory::Directory;
     use crate::letsencrypt::LetsEncrypt;
     use crate::Acme;
+    use serde_json::json;
+
+    #[test]
+    fn test_deserialization() {
+        let json = serde_json::to_string_pretty(&json!({
+            "newNonce": "https://example.com/acme/new-nonce",
+            "newAccount": "https://example.com/acme/new-account",
+            "newOrder": "https://example.com/acme/new-order",
+            "newAuthz": "https://example.com/acme/new-authz",
+            "revokeCert": "https://example.com/acme/revoke-cert",
+            "keyChange": "https://example.com/acme/key-change",
+            "meta": {
+                "termsOfService": "https://example.com/acme/terms/2017-5-30",
+                "website": "https://www.example.com/",
+                "caaIdentities": ["example.com"],
+                "externalAccountRequired": false
+            }
+        }))
+        .unwrap();
+        println!("{json}");
+        let deserialized = serde_json::from_str::<Directory>(json.as_str()).unwrap();
+        assert_eq!(deserialized.new_nonce, "https://example.com/acme/new-nonce");
+        assert_eq!(
+            deserialized.new_account,
+            "https://example.com/acme/new-account"
+        );
+        assert_eq!(deserialized.new_order, "https://example.com/acme/new-order");
+    }
 
     async fn letsencrypt(environment: &LetsEncrypt) {
         let acme = Acme::default();
