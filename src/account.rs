@@ -26,6 +26,22 @@ struct PackedAccount {
     kid: String,
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "status")]
+pub(crate) enum AcmeAccount {
+    #[serde(rename = "valid")]
+    Valid {
+        contact: Vec<String>,
+        #[serde(rename = "termsOfServiceAgreed")]
+        terms_of_service_agreed: bool,
+        orders: String,
+    },
+    #[serde(rename = "deactivated")]
+    Deactivated {},
+    #[serde(rename = "revoked")]
+    Revoked {},
+}
+
 impl From<PackedAccount> for Account {
     fn from(value: PackedAccount) -> Self {
         Self {
@@ -86,16 +102,19 @@ impl Account {
             .await
             .map_err(|_| Error::NewAccount)?;
         if response.is_success() {
-            let account = response
-                .header_value("location")
-                .map(|kid| Self {
+            let kid = response.header_value("location").ok_or(Error::NewAccount)?;
+            let acme_account = response
+                .body_as_json::<AcmeAccount>()
+                .await
+                .map_err(|_| Error::NewAccount)?;
+            match acme_account {
+                AcmeAccount::Valid { orders, .. } => Ok(Account {
                     keypair,
                     pkcs8,
                     kid,
-                })
-                .ok_or(Error::NewAccount)?;
-            let _ = response.body_as_bytes();
-            Ok(account)
+                }),
+                _ => Err(Error::NewAccount),
+            }
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
