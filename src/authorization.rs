@@ -41,7 +41,13 @@ impl Authorization {
     ) -> Result<Authorization> {
         let url = url.as_ref();
         let nonce = directory.new_nonce(client).await?;
-        let body = jose(&account.keypair, None, Some(&account.url), &nonce, url);
+        let body = jose(
+            &account.keypair,
+            None,
+            Some(&account.url),
+            Some(&nonce),
+            url,
+        );
         let response = client
             .post_jose(url, &body)
             .await

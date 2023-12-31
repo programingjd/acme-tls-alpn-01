@@ -14,19 +14,11 @@ pub(crate) fn jose(
     keypair: &EcdsaKeyPair,
     payload: Option<Value>,
     kid: Option<&str>,
-    nonce: &str,
+    nonce: Option<&str>,
     url: &str,
 ) -> Value {
-    let (x, y) = keypair.public_key().as_ref()[1..].split_at(32);
     let jwk = match kid {
-        None => Some(Jwk {
-            alg: ALGORITHM,
-            crv: CURVE,
-            kty: KEY_TYPE,
-            u: PUBLIC_KEY_USE,
-            x: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(x),
-            y: BASE64_URL_SAFE_NO_PAD.encode(y),
-        }),
+        None => Some(jwk(keypair)),
         _ => None,
     };
     let protected = Protected {
@@ -54,8 +46,20 @@ pub(crate) fn jose(
     serde_json::to_value(body).unwrap()
 }
 
+pub(crate) fn jwk(keypair: &EcdsaKeyPair) -> Jwk {
+    let (x, y) = keypair.public_key().as_ref()[1..].split_at(32);
+    Jwk {
+        alg: ALGORITHM,
+        crv: CURVE,
+        kty: KEY_TYPE,
+        u: PUBLIC_KEY_USE,
+        x: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(x),
+        y: BASE64_URL_SAFE_NO_PAD.encode(y),
+    }
+}
+
 #[derive(Serialize)]
-struct Jwk {
+pub(crate) struct Jwk {
     alg: &'static str,
     crv: &'static str,
     kty: &'static str,
@@ -80,7 +84,8 @@ struct Protected<'a> {
     jwk: Option<Jwk>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kid: Option<&'a str>,
-    nonce: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nonce: Option<&'a str>,
     url: &'a str,
 }
 

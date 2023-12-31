@@ -10,6 +10,7 @@ pub enum Error {
     NewAccount,
     DeserializeAccount,
     GetAccount,
+    ChangeAccountKey,
     Csr { domains: Vec<String> },
     NewOrder,
     InvalidOrder { domains: Vec<String> },
@@ -42,6 +43,9 @@ impl Display for Error {
             }
             Error::GetAccount => {
                 write!(f, "could not get account")
+            }
+            Error::ChangeAccountKey => {
+                write!(f, "could not change account key")
             }
             Error::Csr { ref domains } => {
                 write!(

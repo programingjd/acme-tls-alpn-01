@@ -2,7 +2,7 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Error::DeserializeAccount;
 use crate::errors::{Error, Result};
-use crate::jose::jose;
+use crate::jose::{jose, jwk};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::{Deserialize, Serialize};
@@ -83,7 +83,7 @@ impl AccountMaterial {
             &account.keypair,
             Some(payload),
             Some(&account.url),
-            &nonce,
+            Some(&nonce),
             &account.url,
         );
         let response = client
@@ -173,7 +173,7 @@ impl AccountMaterial {
             &self.keypair,
             Some(payload),
             Some(&self.url),
-            &nonce,
+            Some(&nonce),
             &self.url,
         );
         let response = client
@@ -200,8 +200,52 @@ impl AccountMaterial {
             Err(Error::GetAccount)
         }
     }
-    pub async fn update_key(&self) -> Result<Self> {
-        todo!()
+    pub async fn update_key<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        &self,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<Self> {
+        let pkcs8 = Self::generate_pkcs8();
+        let keypair = Self::keypair_from_pkcs8(&pkcs8).unwrap();
+        let nonce = directory.new_nonce(client).await?;
+        let payload = json!({
+            "account": &self.url,
+            "oldKey": jwk(&self.keypair)
+        });
+        let payload = jose(&keypair, Some(payload), None, None, &directory.key_change);
+        let body = jose(
+            &self.keypair,
+            Some(payload),
+            Some(&self.url),
+            Some(&nonce),
+            &directory.key_change,
+        );
+        let response = client
+            .post_jose(&directory.key_change, &body)
+            .await
+            .map_err(|_| Error::ChangeAccountKey)?;
+        if response.is_success() {
+            let account = response
+                .body_as_json::<Account>()
+                .await
+                .map_err(|_| Error::ChangeAccountKey)?;
+            match account.status {
+                AccountStatus::Valid { .. } => Ok(AccountMaterial {
+                    keypair,
+                    pkcs8,
+                    url: self.url.clone(),
+                }),
+                _ => Err(Error::ChangeAccountKey),
+            }
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::ChangeAccountKey)
+        }
     }
     async fn new_account<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         pkcs8: Vec<u8>,
@@ -219,7 +263,7 @@ impl AccountMaterial {
             &keypair,
             Some(payload),
             None,
-            &nonce,
+            Some(&nonce),
             &directory.new_account,
         );
         let response = client
@@ -228,17 +272,10 @@ impl AccountMaterial {
             .map_err(|_| Error::NewAccount)?;
         if response.is_success() {
             let kid = response.header_value("location").ok_or(Error::NewAccount)?;
-            println!("kid: {}", &kid);
-            // let account = response
-            //     .body_as_json::<Account>()
-            //     .await
-            //     .map_err(|_| Error::NewAccount)?;
             let account = response
-                .body_as_text()
+                .body_as_json::<Account>()
                 .await
                 .map_err(|_| Error::NewAccount)?;
-            println!("account: {account}");
-            let account = serde_json::from_str::<Account>(&account).unwrap();
             match account.status {
                 AccountStatus::Valid { .. } => Ok(AccountMaterial {
                     keypair,
@@ -354,5 +391,7 @@ mod test {
         .unwrap();
         assert_eq!(account.url, created.url);
         assert_eq!(account.pkcs8, created.pkcs8);
+        let updated = account.update_key(&directory, &acme.client).await.unwrap();
+        assert_eq!(updated.url, created.url);
     }
 }

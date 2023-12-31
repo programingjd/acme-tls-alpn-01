@@ -13,7 +13,7 @@ pub struct Directory {
     // #[serde(rename = "revokeCert")]
     // revoke_cert: String,
     #[serde(rename = "keyChange")]
-    key_change: String,
+    pub(crate) key_change: String,
 }
 
 impl Directory {

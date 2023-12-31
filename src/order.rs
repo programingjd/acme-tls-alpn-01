@@ -68,7 +68,7 @@ impl LocatedOrder {
             &account.keypair,
             Some(payload),
             Some(&account.url),
-            &nonce,
+            Some(&nonce),
             &directory.new_order,
         );
         let response = client
@@ -125,7 +125,13 @@ impl LocatedOrder {
         client: &C,
     ) -> Result<Self> {
         let nonce = directory.new_nonce(client).await?;
-        let body = jose(&account.keypair, None, Some(&account.url), &nonce, &url);
+        let body = jose(
+            &account.keypair,
+            None,
+            Some(&account.url),
+            Some(&nonce),
+            &url,
+        );
         let response = client
             .post_jose(&url, &body)
             .await
