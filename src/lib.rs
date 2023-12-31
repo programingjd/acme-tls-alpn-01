@@ -10,7 +10,9 @@ mod account;
 mod authorization;
 mod challenge;
 mod client;
+mod csr;
 mod directory;
+pub mod ecdsa;
 mod errors;
 mod jose;
 pub mod letsencrypt;
@@ -62,7 +64,7 @@ impl<C: HttpClient<R, E>, R: Response<E>, E: Error> Acme<R, E, C> {
         domain_names: impl Iterator<Item = impl Into<String>>,
         account: &AccountMaterial,
         directory: &Directory,
-    ) -> Result<()> {
+    ) -> Result<String> {
         LocatedOrder::new_order(domain_names, account, directory, &self.client)
             .await?
             .process(account, directory, &self.client)

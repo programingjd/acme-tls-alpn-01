@@ -1,10 +1,10 @@
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
+use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
 use crate::errors::Error::DeserializeAccount;
 use crate::errors::{Error, Result};
-use crate::jose::{jose, jwk};
-use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use crate::jose::jose;
+use ring::signature::EcdsaKeyPair;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -46,7 +46,7 @@ impl TryFrom<PackedAccountMaterial> for AccountMaterial {
     type Error = Error;
     fn try_from(value: PackedAccountMaterial) -> Result<Self> {
         Ok(Self {
-            keypair: Self::keypair_from_pkcs8(&value.pkcs8)?,
+            keypair: keypair_from_pkcs8(&value.pkcs8)?,
             pkcs8: value.pkcs8,
             url: value.url,
         })
@@ -146,7 +146,7 @@ impl AccountMaterial {
         directory: &Directory,
         client: &C,
     ) -> Result<AccountMaterial> {
-        let keypair = Self::keypair_from_pkcs8(&pkcs8)?;
+        let keypair = keypair_from_pkcs8(&pkcs8)?;
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
     pub(crate) async fn from<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
@@ -154,8 +154,8 @@ impl AccountMaterial {
         directory: &Directory,
         client: &C,
     ) -> Result<Self> {
-        let pkcs8 = Self::generate_pkcs8();
-        let keypair = Self::keypair_from_pkcs8(&pkcs8).unwrap();
+        let pkcs8 = generate_pkcs8_ecdsa_keypair();
+        let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
     pub async fn update_contact<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
@@ -205,12 +205,12 @@ impl AccountMaterial {
         directory: &Directory,
         client: &C,
     ) -> Result<Self> {
-        let pkcs8 = Self::generate_pkcs8();
-        let keypair = Self::keypair_from_pkcs8(&pkcs8).unwrap();
+        let pkcs8 = generate_pkcs8_ecdsa_keypair();
+        let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
         let nonce = directory.new_nonce(client).await?;
         let payload = json!({
             "account": &self.url,
-            "oldKey": jwk(&self.keypair)
+            "oldKey": crate::jose::jwk(&self.keypair)
         });
         let payload = jose(&keypair, Some(payload), None, None, &directory.key_change);
         let body = jose(
@@ -294,16 +294,6 @@ impl AccountMaterial {
             Err(Error::NewAccount)
         }
     }
-    fn generate_pkcs8() -> Vec<u8> {
-        let rng = SystemRandom::new();
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
-        pkcs8.as_ref().to_vec()
-    }
-    fn keypair_from_pkcs8(pkcs8: &Vec<u8>) -> Result<EcdsaKeyPair> {
-        let rng = SystemRandom::new();
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_slice(), &rng)
-            .map_err(|_| Error::InvalidKey)
-    }
 }
 
 mod base64 {
@@ -326,13 +316,14 @@ mod base64 {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
     use crate::letsencrypt::LetsEncrypt;
     use crate::Acme;
 
     #[test]
     fn test_account_material_serialization() {
-        let pkcs8 = AccountMaterial::generate_pkcs8();
-        let keypair = AccountMaterial::keypair_from_pkcs8(&pkcs8).unwrap();
+        let pkcs8 = generate_pkcs8_ecdsa_keypair();
+        let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
         let kid = "kid";
         let original = AccountMaterial {
             pkcs8,
@@ -348,7 +339,7 @@ mod test {
                 .unwrap();
         assert_eq!(deserialized.url, kid);
         assert_eq!(&original.pkcs8, &deserialized.pkcs8);
-        let _ = AccountMaterial::keypair_from_pkcs8(&deserialized.pkcs8).unwrap();
+        let _ = keypair_from_pkcs8(&deserialized.pkcs8).unwrap();
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::csr::Csr;
 use std::fmt::{Display, Formatter};
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -17,7 +18,8 @@ pub enum Error {
     GetAuthorization,
     InvalidAuthorization,
     GetOrder,
-    OrderProcessing,
+    OrderProcessing { csr: Option<Csr> },
+    DownloadCertificate,
 }
 
 impl Display for Error {
@@ -81,8 +83,11 @@ impl Display for Error {
             Error::GetOrder => {
                 write!(f, "could not get order")
             }
-            Error::OrderProcessing => {
+            Error::OrderProcessing { .. } => {
                 write!(f, "order processing stalled")
+            }
+            Error::DownloadCertificate => {
+                write!(f, "failed to download certificate")
             }
         }
     }

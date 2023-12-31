@@ -2,11 +2,11 @@ use crate::account::AccountMaterial;
 use crate::authorization::{Authorization, AuthorizationStatus};
 use crate::challenge::ChallengeType;
 use crate::client::{HttpClient, Response};
+use crate::csr::Csr;
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
 use crate::jose::jose;
 use futures_timer::Delay;
-use rcgen::{Certificate, CertificateParams, DistinguishedName, PKCS_ECDSA_P256_SHA256};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
@@ -97,19 +97,19 @@ impl LocatedOrder {
         account: &AccountMaterial,
         directory: &Directory,
         client: &C,
-    ) -> Result<()> {
-        match self.retry(account, directory, client).await {
+    ) -> Result<String> {
+        match self.retry(account, directory, client, None).await {
             Ok(it) => Ok(it),
-            Err(Error::OrderProcessing) => {
+            Err(Error::OrderProcessing { csr }) => {
                 Delay::new(Duration::from_secs(10u64)).await;
                 let order = Self::try_get(self.url, account, directory, client).await?;
-                match order.retry(account, directory, client).await {
+                match order.retry(account, directory, client, csr).await {
                     Ok(it) => Ok(it),
-                    Err(Error::OrderProcessing) => {
+                    Err(Error::OrderProcessing { csr }) => {
                         Delay::new(Duration::from_secs(150u64)).await;
                         Self::try_get(order.url, account, directory, client)
                             .await?
-                            .retry(account, directory, client)
+                            .retry(account, directory, client, csr)
                             .await
                     }
                     Err(err) => Err(err),
@@ -157,7 +157,8 @@ impl LocatedOrder {
         account: &AccountMaterial,
         directory: &Directory,
         client: &C,
-    ) -> Result<()> {
+        csr: Option<Csr>,
+    ) -> Result<String> {
         match &self.order.status {
             OrderStatus::Invalid => Err(Error::InvalidOrder {
                 domains: self
@@ -174,8 +175,21 @@ impl LocatedOrder {
             }
             OrderStatus::Valid {
                 certificate: url, ..
-            } => Self::download_certificate(url, account, directory, client).await,
-            OrderStatus::Processing => Err(Error::OrderProcessing),
+            } => {
+                if let Some(csr) = csr {
+                    Self::download_certificate(
+                        url,
+                        &csr.private_key_pem,
+                        account,
+                        directory,
+                        client,
+                    )
+                    .await
+                } else {
+                    Err(Error::NewOrder)
+                }
+            }
+            OrderStatus::Processing => Err(Error::OrderProcessing { csr }),
             OrderStatus::Pending => {
                 let futures: Vec<_> = self
                     .order
@@ -203,8 +217,7 @@ impl LocatedOrder {
                         _ => None,
                     }
                 });
-
-                Ok(())
+                todo!()
             }
         }
     }
@@ -213,27 +226,44 @@ impl LocatedOrder {
         _account: &AccountMaterial,
         _directory: &Directory,
         _client: &C,
-    ) -> Result<()> {
+    ) -> Result<String> {
         todo!()
     }
     async fn download_certificate<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
-        _url: impl AsRef<str>,
-        _account: &AccountMaterial,
-        _directory: &Directory,
-        _client: &C,
-    ) -> Result<()> {
-        todo!()
-    }
-
-    fn csr_der(domain_names: Vec<String>) -> Result<Vec<u8>> {
-        let mut params = CertificateParams::new(domain_names.clone());
-        params.distinguished_name = DistinguishedName::new();
-        params.alg = &PKCS_ECDSA_P256_SHA256;
-        Certificate::from_params(params)
-            .and_then(|cert| cert.serialize_der())
-            .map_err(|_| Error::Csr {
-                domains: domain_names,
-            })
+        url: impl AsRef<str>,
+        csr_private_key_pem: &str,
+        account: &AccountMaterial,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<String> {
+        let url = url.as_ref();
+        let nonce = directory.new_nonce(client).await?;
+        let body = jose(
+            &account.keypair,
+            None,
+            Some(&account.url),
+            Some(&nonce),
+            url,
+        );
+        let response = client
+            .post_jose(&url, &body)
+            .await
+            .map_err(|_| Error::DownloadCertificate)?;
+        if response.is_success() {
+            let pem_certificate_chain = response
+                .body_as_text()
+                .await
+                .map_err(|_| Error::DownloadCertificate)?;
+            Ok([csr_private_key_pem, &pem_certificate_chain].join("\n"))
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::DownloadCertificate)
+        }
     }
 }
 
