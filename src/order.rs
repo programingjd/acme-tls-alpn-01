@@ -1,6 +1,6 @@
 use crate::account::AccountMaterial;
 use crate::authorization::{Authorization, AuthorizationStatus};
-use crate::challenge::Challenge;
+use crate::challenge::{Challenge, ChallengeType};
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
@@ -191,7 +191,7 @@ impl LocatedOrder {
                             authorization
                                 .challenges
                                 .into_iter()
-                                .filter(|it| matches!(it, Challenge::TlsAlpn01 { .. })),
+                                .filter(|it| matches!(it.kind, ChallengeType::TlsAlpn01)),
                         ),
                         _ => None,
                     }

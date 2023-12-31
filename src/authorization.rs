@@ -66,7 +66,7 @@ impl Authorization {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::challenge::ChallengeStatus;
+    use crate::challenge::{ChallengeStatus, ChallengeType};
     use crate::letsencrypt::LetsEncrypt;
     use crate::order::{LocatedOrder, OrderStatus};
     use crate::Acme;
@@ -116,26 +116,29 @@ mod test {
         assert_eq!(deserialized.challenges.len(), 3);
         assert_eq!(
             deserialized.challenges[0],
-            Challenge::Http01 {
+            Challenge {
                 url: "https://example.com/acme/chall/prV_B7yEyA4".to_string(),
                 status: ChallengeStatus::Valid,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string()
+                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                kind: ChallengeType::Http01,
             }
         );
         assert_eq!(
             deserialized.challenges[1],
-            Challenge::Dns01 {
+            Challenge {
                 url: "https://example.com/acme/chall/Rg5dV14Gh1Q".to_string(),
                 status: ChallengeStatus::Pending,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string()
+                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                kind: ChallengeType::Dns01,
             }
         );
         assert_eq!(
             deserialized.challenges[2],
-            Challenge::TlsAlpn01 {
+            Challenge {
                 url: "https://example.com/acme/chall/PCt92wr-oA".to_string(),
                 status: ChallengeStatus::Pending,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string()
+                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                kind: ChallengeType::TlsAlpn01
             }
         );
     }
@@ -185,8 +188,8 @@ mod test {
                 .challenges
                 .iter()
                 .cloned()
-                .find_map(|it| match it {
-                    Challenge::Http01 { status, .. } => Some(status),
+                .find_map(|it| match it.kind {
+                    ChallengeType::Http01 => Some(it.status),
                     _ => None,
                 }),
             Some(ChallengeStatus::Pending)
@@ -196,8 +199,8 @@ mod test {
                 .challenges
                 .iter()
                 .cloned()
-                .find_map(|it| match it {
-                    Challenge::Dns01 { status, .. } => Some(status),
+                .find_map(|it| match it.kind {
+                    ChallengeType::Dns01 => Some(it.status),
                     _ => None,
                 }),
             Some(ChallengeStatus::Pending)
@@ -207,8 +210,8 @@ mod test {
                 .challenges
                 .iter()
                 .cloned()
-                .find_map(|it| match it {
-                    Challenge::TlsAlpn01 { status, .. } => Some(status),
+                .find_map(|it| match it.kind {
+                    ChallengeType::TlsAlpn01 => Some(it.status),
                     _ => None,
                 }),
             Some(ChallengeStatus::Pending)
