@@ -68,7 +68,7 @@ mod test {
     use super::*;
     use crate::challenge::{ChallengeStatus, ChallengeType};
     use crate::letsencrypt::LetsEncrypt;
-    use crate::order::LocatedOrder;
+    use crate::order::{Identifier, LocatedOrder};
     use crate::Acme;
     use serde_json::json;
 
