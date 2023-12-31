@@ -6,6 +6,7 @@ use crate::csr::Csr;
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
 use crate::jose::jose;
+use base64::Engine;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -103,13 +104,13 @@ impl LocatedOrder {
             Err(Error::OrderProcessing { csr }) => {
                 Delay::new(Duration::from_secs(10u64)).await;
                 let order = Self::try_get(self.url, account, directory, client).await?;
-                match order.retry(account, directory, client, csr).await {
+                match order.retry(account, directory, client, Some(csr)).await {
                     Ok(it) => Ok(it),
                     Err(Error::OrderProcessing { csr }) => {
                         Delay::new(Duration::from_secs(150u64)).await;
                         Self::try_get(order.url, account, directory, client)
                             .await?
-                            .retry(account, directory, client, csr)
+                            .retry(account, directory, client, Some(csr))
                             .await
                     }
                     Err(err) => Err(err),
@@ -170,26 +171,23 @@ impl LocatedOrder {
                     })
                     .collect(),
             }),
-            OrderStatus::Ready => {
-                Self::finalize(&self.order.finalize, account, directory, client).await
-            }
+            OrderStatus::Ready => self.finalize(account, directory, client).await,
             OrderStatus::Valid {
                 certificate: url, ..
             } => {
                 if let Some(csr) = csr {
-                    Self::download_certificate(
-                        url,
-                        &csr.private_key_pem,
-                        account,
-                        directory,
-                        client,
-                    )
-                    .await
+                    Self::download_certificate(url, &csr, account, directory, client).await
                 } else {
                     Err(Error::NewOrder)
                 }
             }
-            OrderStatus::Processing => Err(Error::OrderProcessing { csr }),
+            OrderStatus::Processing => {
+                if let Some(csr) = csr {
+                    Err(Error::OrderProcessing { csr })
+                } else {
+                    Err(Error::NewOrder)
+                }
+            }
             OrderStatus::Pending => {
                 let futures: Vec<_> = self
                     .order
@@ -222,16 +220,57 @@ impl LocatedOrder {
         }
     }
     async fn finalize<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
-        _url: impl AsRef<str>,
-        _account: &AccountMaterial,
-        _directory: &Directory,
-        _client: &C,
+        &self,
+        account: &AccountMaterial,
+        directory: &Directory,
+        client: &C,
     ) -> Result<String> {
-        todo!()
+        let url = &self.order.finalize;
+        let nonce = directory.new_nonce(client).await?;
+        let domain_names: Vec<String> = self
+            .order
+            .identifiers
+            .iter()
+            .filter_map(|identifier| match identifier {
+                Identifier::Dns(domain_name) => Some(domain_name.clone()),
+                #[allow(unreachable_patterns)]
+                _ => None,
+            })
+            .collect();
+        let csr: Csr = domain_names.try_into()?;
+        let payload = json!({
+           "csr": base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(&csr.der)
+        });
+        let body = jose(
+            &account.keypair,
+            Some(payload),
+            Some(&account.url),
+            Some(&nonce),
+            url,
+        );
+        let response = client
+            .post_jose(&url, &body)
+            .await
+            .map_err(|_| Error::FinalizeOrder { csr: csr.clone() })?;
+        if response.is_success() {
+            let order = response
+                .body_as_json::<Order>()
+                .await
+                .map_err(|_| Error::FinalizeOrder { csr: csr.clone() })?;
+            todo!()
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::FinalizeOrder { csr: csr.clone() })
+        }
     }
     async fn download_certificate<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         url: impl AsRef<str>,
-        csr_private_key_pem: &str,
+        csr: &Csr,
         account: &AccountMaterial,
         directory: &Directory,
         client: &C,
@@ -248,13 +287,13 @@ impl LocatedOrder {
         let response = client
             .post_jose(&url, &body)
             .await
-            .map_err(|_| Error::DownloadCertificate)?;
+            .map_err(|_| Error::DownloadCertificate { csr: csr.clone() })?;
         if response.is_success() {
             let pem_certificate_chain = response
                 .body_as_text()
                 .await
-                .map_err(|_| Error::DownloadCertificate)?;
-            Ok([csr_private_key_pem, &pem_certificate_chain].join("\n"))
+                .map_err(|_| Error::DownloadCertificate { csr: csr.clone() })?;
+            Ok(vec![csr.private_key_pem.clone(), pem_certificate_chain].join("\n"))
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
@@ -262,7 +301,7 @@ impl LocatedOrder {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::DownloadCertificate)
+            Err(Error::DownloadCertificate { csr: csr.clone() })
         }
     }
 }

@@ -2,10 +2,10 @@ use crate::ecdsa::generate_pkcs8_ecdsa_keypair;
 use crate::errors::{Error, Result};
 use rcgen::{Certificate, CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
 
-#[derive(Debug)]
-pub(crate) struct Csr {
+#[derive(Debug, Clone)]
+pub struct Csr {
     pub(crate) private_key_pem: String,
-    pub(crate) csr_der: Vec<u8>,
+    pub(crate) der: Vec<u8>,
 }
 
 impl TryFrom<Vec<String>> for Csr {
@@ -22,7 +22,7 @@ impl TryFrom<Vec<String>> for Csr {
         })?;
         Ok(Csr {
             private_key_pem: certificate.serialize_private_key_pem(),
-            csr_der: certificate
+            der: certificate
                 .serialize_request_der()
                 .map_err(|_| Error::Csr {
                     domains: domain_names,
@@ -37,7 +37,7 @@ mod test {
 
     #[test]
     fn test_csr() {
-        let csr: Csr = vec!["example.org".to_string(), "www.example.org".to_string()]
+        let _: Csr = vec!["example.org".to_string(), "www.example.org".to_string()]
             .try_into()
             .unwrap();
     }

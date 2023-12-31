@@ -18,8 +18,9 @@ pub enum Error {
     GetAuthorization,
     InvalidAuthorization,
     GetOrder,
-    OrderProcessing { csr: Option<Csr> },
-    DownloadCertificate,
+    FinalizeOrder { csr: Csr },
+    DownloadCertificate { csr: Csr },
+    OrderProcessing { csr: Csr },
 }
 
 impl Display for Error {
@@ -83,11 +84,14 @@ impl Display for Error {
             Error::GetOrder => {
                 write!(f, "could not get order")
             }
+            Error::DownloadCertificate { .. } => {
+                write!(f, "failed to download certificate")
+            }
+            Error::FinalizeOrder { .. } => {
+                write!(f, "failed to finalize order")
+            }
             Error::OrderProcessing { .. } => {
                 write!(f, "order processing stalled")
-            }
-            Error::DownloadCertificate => {
-                write!(f, "failed to download certificate")
             }
         }
     }
