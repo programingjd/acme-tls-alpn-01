@@ -1,26 +1,29 @@
 use crate::account::AccountMaterial;
-use crate::authorization::Authorization;
+use crate::authorization::{Authorization, AuthorizationStatus};
 use crate::challenge::Challenge;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
 use crate::jose::jose;
+use futures_timer::Delay;
 use rcgen::{Certificate, CertificateParams, DistinguishedName, PKCS_ECDSA_P256_SHA256};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Duration;
 
+#[derive(Debug)]
 pub(crate) struct LocatedOrder {
     url: String,
-    order: Order,
+    pub(crate) order: Order,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Order {
-    identifiers: Vec<Identifier>,
-    authorizations: Vec<String>,
-    finalize: String,
+    pub(crate) identifiers: Vec<Identifier>,
+    pub(crate) authorizations: Vec<String>,
+    pub(crate) finalize: String,
     #[serde(flatten)]
-    status: OrderStatus,
+    pub(crate) status: OrderStatus,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq)]
@@ -90,6 +93,60 @@ impl LocatedOrder {
         }
     }
     pub(crate) async fn process<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        self,
+        account: &AccountMaterial,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<()> {
+        match self.retry(account, directory, client).await {
+            Ok(it) => Ok(it),
+            Err(Error::OrderProcessing) => {
+                Delay::new(Duration::from_secs(10u64)).await;
+                let order = Self::try_get(self.url, account, directory, client).await?;
+                match order.retry(account, directory, client).await {
+                    Ok(it) => Ok(it),
+                    Err(Error::OrderProcessing) => {
+                        Delay::new(Duration::from_secs(150u64)).await;
+                        Self::try_get(order.url, account, directory, client)
+                            .await?
+                            .retry(account, directory, client)
+                            .await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+    async fn try_get<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        url: String,
+        account: &AccountMaterial,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<Self> {
+        let nonce = directory.new_nonce(client).await?;
+        let body = jose(&account.keypair, None, Some(&account.kid), &nonce, &url);
+        let response = client
+            .post_jose(&url, &body)
+            .await
+            .map_err(|_| Error::GetOrder)?;
+        if response.is_success() {
+            let order = response
+                .body_as_json::<Order>()
+                .await
+                .map_err(|_| Error::GetOrder)?;
+            Ok(LocatedOrder { url, order })
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::GetOrder)
+        }
+    }
+    async fn retry<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         &self,
         account: &AccountMaterial,
         directory: &Directory,
@@ -106,11 +163,13 @@ impl LocatedOrder {
                     })
                     .collect(),
             }),
-            OrderStatus::Ready => Self::finalize(&self.order.finalize, client).await,
+            OrderStatus::Ready => {
+                Self::finalize(&self.order.finalize, account, directory, client).await
+            }
             OrderStatus::Valid {
                 certificate: url, ..
-            } => Self::download_certificate(url, client).await,
-            OrderStatus::Processing => todo!(),
+            } => Self::download_certificate(url, account, directory, client).await,
+            OrderStatus::Processing => Err(Error::OrderProcessing),
             OrderStatus::Pending => {
                 let futures: Vec<_> = self
                     .order
@@ -118,28 +177,25 @@ impl LocatedOrder {
                     .iter()
                     .map(|url| Authorization::authorize(url, account, directory, client))
                     .collect();
-                let authorizations = futures::future::join_all(futures)
-                    .await
-                    .into_iter()
-                    .collect::<Result<Vec<_>>>()?;
-                if authorizations.iter().any(|it| match it {
-                    Authorization::Valid { .. } => false,
-                    Authorization::Pending { .. } => false,
+                let authorizations = futures::future::try_join_all(futures).await?;
+                if authorizations.iter().any(|it| match it.status {
+                    AuthorizationStatus::Valid { .. } => false,
+                    AuthorizationStatus::Pending { .. } => false,
                     _ => true,
                 }) {
                     return Err(Error::InvalidAuthorization);
                 }
-                let pending_challenges =
-                    authorizations
-                        .into_iter()
-                        .flat_map(|authorization| match authorization {
-                            Authorization::Pending { challenges, .. } => Some(
-                                challenges
-                                    .into_iter()
-                                    .filter(|it| matches!(it, Challenge::TlsAlpn01 { .. })),
-                            ),
-                            _ => None,
-                        });
+                let pending_challenges = authorizations.into_iter().flat_map(|authorization| {
+                    match authorization.status {
+                        AuthorizationStatus::Pending => Some(
+                            authorization
+                                .challenges
+                                .into_iter()
+                                .filter(|it| matches!(it, Challenge::TlsAlpn01 { .. })),
+                        ),
+                        _ => None,
+                    }
+                });
 
                 Ok(())
             }
@@ -147,12 +203,16 @@ impl LocatedOrder {
     }
     async fn finalize<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         url: impl AsRef<str>,
+        account: &AccountMaterial,
+        directory: &Directory,
         client: &C,
     ) -> Result<()> {
         todo!()
     }
     async fn download_certificate<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
         url: impl AsRef<str>,
+        account: &AccountMaterial,
+        directory: &Directory,
         client: &C,
     ) -> Result<()> {
         todo!()
@@ -251,5 +311,12 @@ mod test {
         .await
         .unwrap();
         println!("{}", order.url);
+        assert_eq!(order.order.status, OrderStatus::Pending);
+        assert_eq!(order.order.identifiers.len(), 1);
+        assert_eq!(
+            order.order.identifiers[0],
+            Identifier::Dns("void.programingjd.me".to_string())
+        );
+        assert_eq!(order.order.authorizations.len(), 1);
     }
 }

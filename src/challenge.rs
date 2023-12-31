@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub(crate) enum Challenge {
     #[serde(rename = "http-01")]
@@ -23,7 +23,7 @@ pub(crate) enum Challenge {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ChallengeStatus {
     #[serde(rename = "pending")]
     Pending,
@@ -34,3 +34,5 @@ pub(crate) enum ChallengeStatus {
     #[serde(rename = "Invalid")]
     Invalid,
 }
+
+impl Challenge {}

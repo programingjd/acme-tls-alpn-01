@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{write, Display, Formatter};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -13,6 +13,8 @@ pub enum Error {
     InvalidOrder { domains: Vec<String> },
     GetAuthorization,
     InvalidAuthorization,
+    GetOrder,
+    OrderProcessing,
 }
 
 impl Display for Error {
@@ -60,6 +62,12 @@ impl Display for Error {
             }
             Error::InvalidAuthorization => {
                 write!(f, "invalid authorization")
+            }
+            Error::GetOrder => {
+                write!(f, "could not get order")
+            }
+            Error::OrderProcessing => {
+                write!(f, "order processing stalled")
             }
         }
     }
