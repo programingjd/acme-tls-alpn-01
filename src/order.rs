@@ -1,6 +1,6 @@
 use crate::account::AccountMaterial;
 use crate::authorization::{Authorization, AuthorizationStatus};
-use crate::challenge::{Challenge, ChallengeType};
+use crate::challenge::ChallengeType;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
@@ -67,7 +67,7 @@ impl LocatedOrder {
         let body = jose(
             &account.keypair,
             Some(payload),
-            Some(&account.kid),
+            Some(&account.url),
             &nonce,
             &directory.new_order,
         );
@@ -125,7 +125,7 @@ impl LocatedOrder {
         client: &C,
     ) -> Result<Self> {
         let nonce = directory.new_nonce(client).await?;
-        let body = jose(&account.keypair, None, Some(&account.kid), &nonce, &url);
+        let body = jose(&account.keypair, None, Some(&account.url), &nonce, &url);
         let response = client
             .post_jose(&url, &body)
             .await
@@ -178,14 +178,15 @@ impl LocatedOrder {
                     .map(|url| Authorization::authorize(url, account, directory, client))
                     .collect();
                 let authorizations = futures::future::try_join_all(futures).await?;
-                if authorizations.iter().any(|it| match it.status {
-                    AuthorizationStatus::Valid { .. } => false,
-                    AuthorizationStatus::Pending { .. } => false,
-                    _ => true,
+                if authorizations.iter().any(|it| {
+                    !matches!(
+                        it.status,
+                        AuthorizationStatus::Valid | AuthorizationStatus::Pending
+                    )
                 }) {
                     return Err(Error::InvalidAuthorization);
                 }
-                let pending_challenges = authorizations.into_iter().flat_map(|authorization| {
+                let _pending_challenges = authorizations.into_iter().flat_map(|authorization| {
                     match authorization.status {
                         AuthorizationStatus::Pending => Some(
                             authorization
@@ -202,18 +203,18 @@ impl LocatedOrder {
         }
     }
     async fn finalize<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
-        url: impl AsRef<str>,
-        account: &AccountMaterial,
-        directory: &Directory,
-        client: &C,
+        _url: impl AsRef<str>,
+        _account: &AccountMaterial,
+        _directory: &Directory,
+        _client: &C,
     ) -> Result<()> {
         todo!()
     }
     async fn download_certificate<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
-        url: impl AsRef<str>,
-        account: &AccountMaterial,
-        directory: &Directory,
-        client: &C,
+        _url: impl AsRef<str>,
+        _account: &AccountMaterial,
+        _directory: &Directory,
+        _client: &C,
     ) -> Result<()> {
         todo!()
     }

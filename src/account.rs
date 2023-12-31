@@ -7,8 +7,6 @@ use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fmt::Display;
-use std::str::FromStr;
 
 #[derive(Serialize)]
 pub struct AccountMaterial {
@@ -16,21 +14,19 @@ pub struct AccountMaterial {
     pub(crate) keypair: EcdsaKeyPair,
     #[serde(with = "base64")]
     pkcs8: Vec<u8>,
-    pub(crate) kid: String,
+    pub(crate) url: String,
 }
 
 #[derive(Deserialize)]
 struct PackedAccountMaterial {
     #[serde(with = "base64")]
     pkcs8: Vec<u8>,
-    kid: String,
+    url: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Account {
-    contact: Vec<String>,
-    #[serde(rename = "termsOfServiceAgreed")]
-    terms_of_service_agreed: bool,
+    // contact: Vec<String>,
     #[serde(flatten)]
     status: AccountStatus,
 }
@@ -46,13 +42,14 @@ pub(crate) enum AccountStatus {
     Revoked {},
 }
 
-impl From<PackedAccountMaterial> for AccountMaterial {
-    fn from(value: PackedAccountMaterial) -> Self {
-        Self {
-            keypair: Self::keypair_from_pkcs8(&value.pkcs8),
+impl TryFrom<PackedAccountMaterial> for AccountMaterial {
+    type Error = Error;
+    fn try_from(value: PackedAccountMaterial) -> Result<Self> {
+        Ok(Self {
+            keypair: Self::keypair_from_pkcs8(&value.pkcs8)?,
             pkcs8: value.pkcs8,
-            kid: value.kid,
-        }
+            url: value.url,
+        })
     }
 }
 
@@ -60,29 +57,155 @@ impl From<AccountMaterial> for PackedAccountMaterial {
     fn from(value: AccountMaterial) -> Self {
         Self {
             pkcs8: value.pkcs8,
-            kid: value.kid,
+            url: value.url,
         }
     }
 }
 
-impl Display for AccountMaterial {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::to_string(&self).unwrap())
-    }
-}
-
-impl FromStr for AccountMaterial {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<AccountMaterial> {
-        serde_json::from_str::<PackedAccountMaterial>(s)
-            .map(|it| it.into())
-            .map_err(|_| DeserializeAccount)
-    }
-}
-
 impl AccountMaterial {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+    pub async fn from_json<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        json: impl AsRef<str>,
+        contact_email: impl AsRef<str>,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<AccountMaterial> {
+        let account: AccountMaterial = serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
+            .map_err(|_| DeserializeAccount)
+            .and_then(|it| it.try_into())?;
+        let nonce = directory.new_nonce(client).await?;
+        let payload = json!({
+            "onlyReturnExisting": true
+        });
+        let body = jose(
+            &account.keypair,
+            Some(payload),
+            Some(&account.url),
+            &nonce,
+            &account.url,
+        );
+        let response = client
+            .post_jose(&account.url, &body)
+            .await
+            .map_err(|_| Error::GetAccount)?;
+        match response.status_code() {
+            200 => {
+                let status = response
+                    .body_as_json::<Account>()
+                    .await
+                    .map_err(|_| Error::GetAccount)?
+                    .status;
+                match status {
+                    AccountStatus::Valid => {
+                        account
+                            .update_contact(contact_email, directory, client)
+                            .await?;
+                        Ok(account)
+                    }
+                    _ => Err(Error::GetAccount),
+                }
+            }
+            403 => {
+                #[cfg(debug_assertions)]
+                if let Ok(text) = response.body_as_text().await {
+                    eprintln!("{text}")
+                }
+                #[cfg(not(debug_assertions))]
+                let _ = response.body_as_text();
+                account
+                    .update_contact(contact_email, directory, client)
+                    .await?;
+                Ok(account)
+            }
+            400 | 404 => {
+                Self::new_account(
+                    account.pkcs8,
+                    account.keypair,
+                    contact_email,
+                    directory,
+                    client,
+                )
+                .await
+            }
+            _ => {
+                #[cfg(debug_assertions)]
+                if let Ok(text) = response.body_as_text().await {
+                    eprintln!("{text}")
+                }
+                #[cfg(not(debug_assertions))]
+                let _ = response.body_as_text();
+                Err(Error::GetAccount)
+            }
+        }
+    }
+    pub async fn from_pkcs8<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        pkcs8: Vec<u8>,
+        contact_email: impl AsRef<str>,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<AccountMaterial> {
+        let keypair = Self::keypair_from_pkcs8(&pkcs8)?;
+        Self::new_account(pkcs8, keypair, contact_email, directory, client).await
+    }
     pub(crate) async fn from<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        contact_email: impl AsRef<str>,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<Self> {
+        let pkcs8 = Self::generate_pkcs8();
+        let keypair = Self::keypair_from_pkcs8(&pkcs8).unwrap();
+        Self::new_account(pkcs8, keypair, contact_email, directory, client).await
+    }
+    pub async fn update_contact<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        &self,
+        contact_email: impl AsRef<str>,
+        directory: &Directory,
+        client: &C,
+    ) -> Result<()> {
+        let nonce = directory.new_nonce(client).await?;
+        let payload = json!({
+            "termsOfServiceAgreed": true,
+            "contact": vec![format!("mailto:{}", contact_email.as_ref())]
+        });
+        let body = jose(
+            &self.keypair,
+            Some(payload),
+            Some(&self.url),
+            &nonce,
+            &self.url,
+        );
+        let response = client
+            .post_jose(&self.url, &body)
+            .await
+            .map_err(|_| Error::GetAccount)?;
+        if response.is_success() {
+            let status = response
+                .body_as_json::<Account>()
+                .await
+                .map_err(|_| Error::NewAccount)?
+                .status;
+            match status {
+                AccountStatus::Valid => Ok(()),
+                _ => Err(Error::GetAccount),
+            }
+        } else {
+            #[cfg(debug_assertions)]
+            if let Ok(text) = response.body_as_text().await {
+                eprintln!("{text}")
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = response.body_as_text();
+            Err(Error::GetAccount)
+        }
+    }
+    pub async fn update_key(&self) -> Result<Self> {
+        todo!()
+    }
+    async fn new_account<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+        pkcs8: Vec<u8>,
+        keypair: EcdsaKeyPair,
         contact_email: impl AsRef<str>,
         directory: &Directory,
         client: &C,
@@ -92,8 +215,6 @@ impl AccountMaterial {
             "termsOfServiceAgreed": true,
             "contact": vec![format!("mailto:{}", contact_email.as_ref())]
         });
-        let pkcs8 = Self::generate_pkcs8();
-        let keypair = Self::keypair_from_pkcs8(&pkcs8);
         let body = jose(
             &keypair,
             Some(payload),
@@ -107,15 +228,22 @@ impl AccountMaterial {
             .map_err(|_| Error::NewAccount)?;
         if response.is_success() {
             let kid = response.header_value("location").ok_or(Error::NewAccount)?;
-            let acme_account = response
-                .body_as_json::<AccountStatus>()
+            println!("kid: {}", &kid);
+            // let account = response
+            //     .body_as_json::<Account>()
+            //     .await
+            //     .map_err(|_| Error::NewAccount)?;
+            let account = response
+                .body_as_text()
                 .await
                 .map_err(|_| Error::NewAccount)?;
-            match acme_account {
+            println!("account: {account}");
+            let account = serde_json::from_str::<Account>(&account).unwrap();
+            match account.status {
                 AccountStatus::Valid { .. } => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
-                    kid,
+                    url: kid,
                 }),
                 _ => Err(Error::NewAccount),
             }
@@ -134,9 +262,10 @@ impl AccountMaterial {
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
         pkcs8.as_ref().to_vec()
     }
-    fn keypair_from_pkcs8(pkcs8: &Vec<u8>) -> EcdsaKeyPair {
+    fn keypair_from_pkcs8(pkcs8: &Vec<u8>) -> Result<EcdsaKeyPair> {
         let rng = SystemRandom::new();
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_slice(), &rng).unwrap()
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_slice(), &rng)
+            .map_err(|_| Error::InvalidKey)
     }
 }
 
@@ -153,7 +282,7 @@ mod base64 {
         let base64 = String::deserialize(d)?;
         base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(base64)
-            .map_err(|e| serde::de::Error::custom(e))
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -166,19 +295,23 @@ mod test {
     #[test]
     fn test_account_material_serialization() {
         let pkcs8 = AccountMaterial::generate_pkcs8();
-        let keypair = AccountMaterial::keypair_from_pkcs8(&pkcs8);
+        let keypair = AccountMaterial::keypair_from_pkcs8(&pkcs8).unwrap();
         let kid = "kid";
         let original = AccountMaterial {
             pkcs8,
             keypair,
-            kid: kid.into(),
+            url: kid.into(),
         };
-        let json = original.to_string();
+        let json = original.to_json();
         println!("{json}");
-        let deserialized = AccountMaterial::from_str(&json).unwrap();
-        assert_eq!(deserialized.kid, kid);
+        let deserialized: AccountMaterial =
+            serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
+                .map_err(|_| DeserializeAccount)
+                .and_then(|it| it.try_into())
+                .unwrap();
+        assert_eq!(deserialized.url, kid);
         assert_eq!(&original.pkcs8, &deserialized.pkcs8);
-        let _ = AccountMaterial::keypair_from_pkcs8(&deserialized.pkcs8);
+        let _ = AccountMaterial::keypair_from_pkcs8(&deserialized.pkcs8).unwrap();
     }
 
     #[test]
@@ -196,14 +329,10 @@ mod test {
         println!("{json}");
         let deserialized = serde_json::from_str::<Account>(json.as_str()).unwrap();
         assert_eq!(deserialized.status, AccountStatus::Valid);
-        assert_eq!(deserialized.contact.len(), 2);
-        assert_eq!(deserialized.contact[0], "mailto:cert-admin@example.org");
-        assert_eq!(deserialized.contact[1], "mailto:admin@example.org");
-        assert!(deserialized.terms_of_service_agreed);
     }
 
     #[tokio::test]
-    async fn test_new_account() {
+    async fn test_get_account_and_update_key() {
         let acme = Acme::default();
         let directory = Directory::from(
             LetsEncrypt::StagingEnvironment.directory_url(),
@@ -211,8 +340,19 @@ mod test {
         )
         .await
         .unwrap();
-        let _ = AccountMaterial::from("void@programingjd.me", &directory, &acme.client)
+        let created = AccountMaterial::from("void@programingjd.me", &directory, &acme.client)
             .await
             .unwrap();
+        println!("{}", &created.url);
+        let account = AccountMaterial::from_pkcs8(
+            created.pkcs8.clone(),
+            "void@programingjd.me",
+            &directory,
+            &acme.client,
+        )
+        .await
+        .unwrap();
+        assert_eq!(account.url, created.url);
+        assert_eq!(account.pkcs8, created.pkcs8);
     }
 }

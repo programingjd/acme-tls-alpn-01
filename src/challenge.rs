@@ -39,8 +39,6 @@ impl Challenge {}
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::letsencrypt::LetsEncrypt;
-    use crate::Acme;
     use serde_json::json;
 
     #[test]

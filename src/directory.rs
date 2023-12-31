@@ -11,9 +11,9 @@ pub struct Directory {
     #[serde(rename = "newOrder")]
     pub(crate) new_order: String,
     // #[serde(rename = "revokeCert")]
-    // revoke_cert: Option<String>,
-    // #[serde(rename = "keyChange")]
-    // key_change: Option<String>,
+    // revoke_cert: String,
+    #[serde(rename = "keyChange")]
+    key_change: String,
 }
 
 impl Directory {
@@ -61,7 +61,7 @@ impl Directory {
             let nonce = response
                 .header_value("replay-nonce")
                 .ok_or(Error::NewNonce)?;
-            let _ = response.body_as_bytes();
+            let _ = response.body_as_bytes().await;
             Ok(nonce)
         } else {
             #[cfg(debug_assertions)]
@@ -107,6 +107,10 @@ mod test {
             "https://example.com/acme/new-account"
         );
         assert_eq!(deserialized.new_order, "https://example.com/acme/new-order");
+        assert_eq!(
+            deserialized.key_change,
+            "https://example.com/acme/key-change"
+        );
     }
 
     async fn letsencrypt(environment: &LetsEncrypt) {
@@ -125,6 +129,10 @@ mod test {
         assert_eq!(
             directory.new_order,
             format!("https://{}/acme/new-order", environment.domain())
+        );
+        assert_eq!(
+            directory.key_change,
+            format!("https://{}/acme/key-change", environment.domain())
         );
     }
 

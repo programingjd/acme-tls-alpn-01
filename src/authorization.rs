@@ -4,12 +4,12 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::{Error, Result};
 use crate::jose::jose;
-use crate::order::Identifier;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Authorization {
-    pub(crate) identifier: Identifier,
+    #[cfg(test)]
+    identifier: crate::order::Identifier,
     pub(crate) challenges: Vec<Challenge>,
     #[serde(flatten)]
     pub(crate) status: AuthorizationStatus,
@@ -41,7 +41,7 @@ impl Authorization {
     ) -> Result<Authorization> {
         let url = url.as_ref();
         let nonce = directory.new_nonce(client).await?;
-        let body = jose(&account.keypair, None, Some(&account.kid), &nonce, url);
+        let body = jose(&account.keypair, None, Some(&account.url), &nonce, url);
         let response = client
             .post_jose(url, &body)
             .await
@@ -68,10 +68,9 @@ mod test {
     use super::*;
     use crate::challenge::{ChallengeStatus, ChallengeType};
     use crate::letsencrypt::LetsEncrypt;
-    use crate::order::{LocatedOrder, OrderStatus};
+    use crate::order::LocatedOrder;
     use crate::Acme;
     use serde_json::json;
-    use std::ffi::c_long;
 
     #[test]
     fn test_order_deserialization() {

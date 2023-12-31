@@ -1,13 +1,15 @@
-use std::fmt::{write, Display, Formatter};
+use std::fmt::{Display, Formatter};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
     FetchDirectory { url: String },
+    InvalidKey,
     NewNonce,
     NewAccount,
     DeserializeAccount,
+    GetAccount,
     Csr { domains: Vec<String> },
     NewOrder,
     InvalidOrder { domains: Vec<String> },
@@ -23,14 +25,23 @@ impl Display for Error {
             Error::FetchDirectory { ref url } => {
                 write!(f, "could not fetch ACME directory at {url}")
             }
+            Error::InvalidKey => {
+                write!(
+                    f,
+                    "invalid pkcs8 (the key should be ECDSA_P256_SHA256_FIXED_SIGNING)"
+                )
+            }
             Error::NewNonce => {
                 write!(f, "could not get a new nonce")
             }
             Error::NewAccount => {
-                write!(f, "could not get or create account")
+                write!(f, "could not create account")
             }
             Error::DeserializeAccount => {
                 write!(f, "could not deserialize account")
+            }
+            Error::GetAccount => {
+                write!(f, "could not get account")
             }
             Error::Csr { ref domains } => {
                 write!(
