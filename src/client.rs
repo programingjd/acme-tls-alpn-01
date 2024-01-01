@@ -27,16 +27,17 @@ pub trait Response {
 impl<C: HttpClient<R>, R: Response> Acme<R, C> {
     pub fn from_client_and_domain_keys(
         client: C,
-        domain_names: impl Iterator<Item = (&'static str, Option<CertifiedKey>)>,
+        domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
     ) -> Self {
         let (resolver, mut writer) = CertResolver::create();
         let mut domains = Vec::new();
         domain_names.for_each(|(domain, it)| {
-            domains.push(domain);
+            let domain = domain.into();
+            domains.push(domain.clone());
             writer.guard().insert(
-                domain,
+                domain.clone(),
                 DomainResolver {
-                    key: Arc::new(it.unwrap_or_else(|| create_self_signed_certificate(domain))),
+                    key: Arc::new(it.unwrap_or_else(|| create_self_signed_certificate(&domain))),
                     challenge_key: None,
                     notifier: None,
                 },

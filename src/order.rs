@@ -6,13 +6,18 @@ use crate::csr::Csr;
 use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
+use crate::resolver::DomainResolver;
 use base64::Engine;
+use flashmap::WriteHandle;
+use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::{channel, StreamExt};
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::hash_map::RandomState;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -114,9 +119,10 @@ impl LocatedOrder {
         self,
         account: &AccountMaterial,
         directory: &Directory,
+        writer: &mut WriteHandle<String, DomainResolver, RandomState>,
         client: &C,
     ) -> Result<String> {
-        match self.retry(account, directory, client, None).await {
+        match self.retry(account, directory, writer, client, None).await {
             Ok(it) => Ok(it),
             Err(Error {
                 kind: ErrorKind::OrderProcessing { csr },
@@ -124,7 +130,10 @@ impl LocatedOrder {
             }) => {
                 Delay::new(Duration::from_secs(10u64)).await;
                 let order = Self::try_get(self.url, account, directory, client).await?;
-                match order.retry(account, directory, client, Some(csr)).await {
+                match order
+                    .retry(account, directory, writer, client, Some(csr))
+                    .await
+                {
                     Ok(it) => Ok(it),
                     Err(Error {
                         kind: ErrorKind::OrderProcessing { csr },
@@ -133,7 +142,7 @@ impl LocatedOrder {
                         Delay::new(Duration::from_secs(150u64)).await;
                         Self::try_get(order.url, account, directory, client)
                             .await?
-                            .retry(account, directory, client, Some(csr))
+                            .retry(account, directory, writer, client, Some(csr))
                             .await
                     }
                     Err(err) => Err(err),
@@ -180,6 +189,7 @@ impl LocatedOrder {
         &self,
         account: &AccountMaterial,
         directory: &Directory,
+        writer: &mut WriteHandle<String, DomainResolver, RandomState>,
         client: &C,
         csr: Option<Csr>,
     ) -> Result<String> {
@@ -229,19 +239,43 @@ impl LocatedOrder {
                     return Err(ErrorKind::InvalidAuthorization.into());
                 }
                 let mut pending_challenges = FuturesUnordered::<_>::new();
+                let mut guard = writer.guard();
                 authorizations.into_iter().for_each(|authorization| {
+                    let Identifier::Dns(ref domain_name) = authorization.identifier;
                     if matches!(authorization.status, AuthorizationStatus::Pending) {
                         authorization.challenges.into_iter().for_each(|ref it| {
                             if matches!(it.kind, ChallengeType::TlsAlpn01) {
-                                pending_challenges.push(async {
-                                    //let (tx, mut rx) = channel::oneshot::channel();
-                                })
+                                let resolver = guard.get(domain_name).unwrap();
+                                let (sender, receiver) = channel::oneshot::channel();
+                                let resolver = DomainResolver {
+                                    key: Arc::new(resolver.key.as_ref().clone()),
+                                    challenge_key: None, // TODO
+                                    notifier: Some(sender),
+                                };
+                                guard.insert(domain_name.clone(), resolver);
+                                pending_challenges.push(receiver);
                             }
                         });
                     }
                 });
-                while pending_challenges.next().await.is_some() {}
-                todo!()
+                let mut delay = Delay::new(Duration::from_secs(120));
+                loop {
+                    let next = pending_challenges.next();
+                    match select(delay, next).await {
+                        Either::Left(_) => {
+                            return Err(ErrorKind::Challenge.into());
+                        }
+                        Either::Right((result, unresolved_delay)) => {
+                            match result {
+                                None => break,
+                                Some(Err(_)) => return Err(ErrorKind::Challenge.into()),
+                                _ => {}
+                            }
+                            delay = unresolved_delay;
+                        }
+                    }
+                }
+                todo!("wait for order authorizations to be valid and then finalize")
             }
         }
     }

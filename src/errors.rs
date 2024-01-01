@@ -34,6 +34,7 @@ pub enum ErrorKind {
     GetAuthorization,
     InvalidAuthorization,
     GetOrder,
+    Challenge,
     FinalizeOrder,
     DownloadCertificate,
     OrderProcessing { csr: Csr },
@@ -158,6 +159,9 @@ impl Display for ErrorKind {
             }
             ErrorKind::GetOrder => {
                 write!(f, "could not get order")
+            }
+            ErrorKind::Challenge => {
+                write!(f, "could not validate challenge")
             }
             ErrorKind::DownloadCertificate => {
                 write!(f, "failed to download certificate")

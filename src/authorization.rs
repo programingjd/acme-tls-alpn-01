@@ -8,8 +8,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Authorization {
-    #[cfg(test)]
-    identifier: crate::order::Identifier,
+    pub(crate) identifier: crate::order::Identifier,
     pub(crate) challenges: Vec<Challenge>,
     #[serde(flatten)]
     pub(crate) status: AuthorizationStatus,

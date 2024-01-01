@@ -9,14 +9,14 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub struct CertResolver {
-    reader: ReadHandle<&'static str, DomainResolver, RandomState>,
+    reader: ReadHandle<String, DomainResolver, RandomState>,
 }
 
 #[derive(Debug)]
 pub(crate) struct DomainResolver {
     pub(crate) key: Arc<CertifiedKey>,
     pub(crate) challenge_key: Option<Arc<CertifiedKey>>,
-    pub(crate) notifier: Option<Sender<&'static str>>,
+    pub(crate) notifier: Option<Sender<String>>,
 }
 
 impl Debug for CertResolver {
@@ -40,9 +40,9 @@ impl From<CertifiedKey> for DomainResolver {
 impl CertResolver {
     pub(crate) fn create() -> (
         CertResolver,
-        WriteHandle<&'static str, DomainResolver, RandomState>,
+        WriteHandle<String, DomainResolver, RandomState>,
     ) {
-        let (writer, reader) = flashmap::new::<&'static str, DomainResolver>();
+        let (writer, reader) = flashmap::new::<String, DomainResolver>();
         (CertResolver { reader }, writer)
     }
 }

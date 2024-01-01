@@ -38,14 +38,14 @@ where
 {
     _r: PhantomData<R>,
     client: C,
-    domains: Vec<&'static str>,
+    domains: Vec<String>,
     resolver: CertResolver,
-    writer: WriteHandle<&'static str, DomainResolver, RandomState>,
+    writer: WriteHandle<String, DomainResolver, RandomState>,
 }
 
 impl Acme<reqwest::Response, reqwest::Client> {
     pub fn from_domain_keys(
-        domain_names: impl Iterator<Item = (&'static str, Option<CertifiedKey>)>,
+        domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
     ) -> Self {
         Self::from_client_and_domain_keys(reqwest::Client::default(), domain_names)
     }
@@ -84,18 +84,13 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
         AccountMaterial::from(contact_email, directory, &self.client).await
     }
     pub async fn request_certificates(
-        &self,
+        &mut self,
         account: &AccountMaterial,
         directory: &Directory,
     ) -> Result<String> {
-        LocatedOrder::new_order(
-            self.domains.iter().copied(),
-            account,
-            directory,
-            &self.client,
-        )
-        .await?
-        .process(account, directory, &self.client)
-        .await
+        LocatedOrder::new_order(self.domains.iter(), account, directory, &self.client)
+            .await?
+            .process(account, directory, &mut self.writer, &self.client)
+            .await
     }
 }
