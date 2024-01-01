@@ -3,7 +3,12 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Result;
 use crate::order::LocatedOrder;
+use crate::resolver::{CertResolver, DomainResolver};
+use flashmap::WriteHandle;
+use rustls::sign::CertifiedKey;
+use std::collections::hash_map::RandomState;
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 mod account;
 mod authorization;
@@ -33,6 +38,17 @@ where
 {
     _r: PhantomData<R>,
     client: C,
+    domains: Vec<&'static str>,
+    resolver: CertResolver,
+    writer: WriteHandle<&'static str, DomainResolver, RandomState>,
+}
+
+impl Acme<reqwest::Response, reqwest::Client> {
+    pub fn from_domain_keys(
+        domain_names: impl Iterator<Item = (&'static str, Option<CertifiedKey>)>,
+    ) -> Self {
+        Self::from_client_and_domain_keys(reqwest::Client::default(), domain_names)
+    }
 }
 
 #[cfg(not(feature = "reqwest"))]
@@ -43,6 +59,17 @@ where
     C: HttpClient<R, E>,
 {
     client: C,
+    domains: Vec<&'static str>,
+    resolver: CertResolver,
+    writer: WriteHandle<&'static str, DomainResolver, RandomState>,
+}
+
+impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
+    type Target = CertResolver;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resolver
+    }
 }
 
 impl<C: HttpClient<R>, R: Response> Acme<R, C> {
@@ -58,13 +85,17 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
     }
     pub async fn request_certificates(
         &self,
-        domain_names: impl Iterator<Item = impl Into<String>>,
         account: &AccountMaterial,
         directory: &Directory,
     ) -> Result<String> {
-        LocatedOrder::new_order(domain_names, account, directory, &self.client)
-            .await?
-            .process(account, directory, &self.client)
-            .await
+        LocatedOrder::new_order(
+            self.domains.iter().copied(),
+            account,
+            directory,
+            &self.client,
+        )
+        .await?
+        .process(account, directory, &self.client)
+        .await
     }
 }

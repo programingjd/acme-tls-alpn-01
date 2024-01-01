@@ -33,6 +33,16 @@ version = "3.0"
 default-features = false
 features = []
 
+[dependencies.futures-channel]
+version = "0.3"
+default-features = false
+features = ["std","alloc"]
+
+[dependencies.flashmap]
+version = "0.1"
+default-features = false
+features = ["default"]
+
 [dependencies.rcgen]
 version = "0.12"
 default-features = false
@@ -42,6 +52,16 @@ features = ["ring","pem"]
 version = "3.0"
 default-features = false
 features = ["std"]
+
+[dependencies.rustls]
+version = "0.22"
+default-features = false
+features = ["ring"]
+
+#[dependencies.postage]
+#version = "0.5"
+#default-features = false
+#features = ["futures-traits"]
 
 [dependencies.reqwest]
 optional = true

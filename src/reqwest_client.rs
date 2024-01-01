@@ -1,6 +1,5 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{ErrorKind, Result};
-use crate::Acme;
 use futures_timer::Delay;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -126,23 +125,13 @@ impl Response for reqwest::Response {
     }
 }
 
-impl Default for Acme<reqwest::Response, Client> {
-    fn default() -> Self {
-        Acme::new(init_client())
-    }
-}
-
-fn init_client() -> Client {
-    Client::default()
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[tokio::test]
     async fn test_text() {
-        let client = init_client();
+        let client = Client::default();
         let response = client.get_request("https://www.example.com").await.unwrap();
         let text = response.text().await.unwrap();
         assert!(text.starts_with("<!doctype html>"))

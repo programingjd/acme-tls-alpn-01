@@ -7,6 +7,8 @@ use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
 use base64::Engine;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -226,17 +228,19 @@ impl LocatedOrder {
                 }) {
                     return Err(ErrorKind::InvalidAuthorization.into());
                 }
-                let _pending_challenges = authorizations.into_iter().flat_map(|authorization| {
-                    match authorization.status {
-                        AuthorizationStatus::Pending => Some(
-                            authorization
-                                .challenges
-                                .into_iter()
-                                .filter(|it| matches!(it.kind, ChallengeType::TlsAlpn01)),
-                        ),
-                        _ => None,
+                let mut pending_challenges = FuturesUnordered::<_>::new();
+                authorizations.into_iter().for_each(|authorization| {
+                    if matches!(authorization.status, AuthorizationStatus::Pending) {
+                        authorization.challenges.into_iter().for_each(|ref it| {
+                            if matches!(it.kind, ChallengeType::TlsAlpn01) {
+                                pending_challenges.push(async {
+                                    //let (tx, mut rx) = channel::oneshot::channel();
+                                })
+                            }
+                        });
                     }
                 });
+                while pending_challenges.next().await.is_some() {}
                 todo!()
             }
         }
@@ -279,7 +283,13 @@ impl LocatedOrder {
                 .body_as_json::<Order>()
                 .await
                 .map_err(|err| ErrorKind::FinalizeOrder.wrap(err))?;
-            todo!()
+            match order.status {
+                OrderStatus::Processing => Err(ErrorKind::OrderProcessing { csr }.into()),
+                OrderStatus::Valid { certificate } => {
+                    Self::download_certificate(certificate, &csr, account, directory, client).await
+                }
+                _ => Err(ErrorKind::FinalizeOrder.into()),
+            }
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {

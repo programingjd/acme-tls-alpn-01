@@ -5,8 +5,8 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct Error {
-    pub kind: ErrorKind,
-    pub cause: Option<ErrorDetail>,
+    pub(crate) kind: ErrorKind,
+    pub(crate) cause: Option<ErrorDetail>,
 }
 
 #[derive(Debug)]
