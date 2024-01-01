@@ -1,8 +1,8 @@
 use crate::ecdsa::generate_pkcs8_ecdsa_keypair;
-use crate::errors::{Error, Result};
+use crate::errors::{Error, ErrorKind, Result};
 use rcgen::{Certificate, CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Csr {
     pub(crate) private_key_pem: String,
     pub(crate) der: Vec<u8>,
@@ -17,16 +17,22 @@ impl TryFrom<Vec<String>> for Csr {
         params.alg = &PKCS_ECDSA_P256_SHA256;
         params.key_pair = Some(keypair);
         params.distinguished_name = DistinguishedName::new();
-        let certificate = Certificate::from_params(params).map_err(|_| Error::Csr {
-            domains: domain_names.clone(),
+        let certificate = Certificate::from_params(params).map_err(|_| {
+            let error: Error = ErrorKind::Csr {
+                domains: domain_names.clone(),
+            }
+            .into();
+            error
         })?;
         Ok(Csr {
             private_key_pem: certificate.serialize_private_key_pem(),
-            der: certificate
-                .serialize_request_der()
-                .map_err(|_| Error::Csr {
+            der: certificate.serialize_request_der().map_err(|_| {
+                let error: Error = ErrorKind::Csr {
                     domains: domain_names,
-                })?,
+                }
+                .into();
+                error
+            })?,
         })
     }
 }

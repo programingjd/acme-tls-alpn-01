@@ -2,7 +2,7 @@ use crate::account::AccountMaterial;
 use crate::challenge::Challenge;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
-use crate::errors::{Error, Result};
+use crate::errors::{ErrorKind, Result};
 use crate::jose::jose;
 use serde::Deserialize;
 
@@ -33,7 +33,7 @@ pub(crate) enum AuthorizationStatus {
 }
 
 impl Authorization {
-    pub(crate) async fn authorize<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn authorize<C: HttpClient<R>, R: Response>(
         url: impl AsRef<str>,
         account: &AccountMaterial,
         directory: &Directory,
@@ -51,12 +51,12 @@ impl Authorization {
         let response = client
             .post_jose(url, &body)
             .await
-            .map_err(|_| Error::GetAuthorization)?;
+            .map_err(|err| ErrorKind::GetAuthorization.wrap(err))?;
         if response.is_success() {
             response
                 .body_as_json::<Authorization>()
                 .await
-                .map_err(|_| Error::GetAuthorization)
+                .map_err(|err| ErrorKind::GetAuthorization.wrap(err))
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
@@ -64,7 +64,7 @@ impl Authorization {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::GetAuthorization)
+            Err(ErrorKind::GetAuthorization.into())
         }
     }
 }

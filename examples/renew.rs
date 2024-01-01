@@ -43,8 +43,8 @@ async fn main() -> std::io::Result<()> {
                             let client_hello = start_handshake.client_hello();
                             let server_name = client_hello.server_name();
                             if server_name.is_some_and(|name| name == domain_name) {
-                                if let Ok(mut stream) = start_handshake.into_stream(config).await {
-                                    handle_request(&mut stream).await;
+                                if let Ok(stream) = start_handshake.into_stream(config).await {
+                                    handle_request(stream).await;
                                 }
                             }
                         }
@@ -62,7 +62,7 @@ async fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn restore_certificate(domain_name: &str) -> Option<CertifiedKey> {
+fn restore_certificate(_domain_name: &str) -> Option<CertifiedKey> {
     None
 }
 
@@ -81,9 +81,13 @@ fn create_self_signed_certificate(domain_name: &str) -> CertifiedKey {
     )
 }
 
-async fn handle_request(stream: &mut TlsStream<TcpStream>) {
+async fn handle_request(stream: TlsStream<TcpStream>) {
     let (mut reader, mut writer) = split(stream);
-    join!(
+    let (reader, writer) = join!(
+        async move {
+            let _ = copy(&mut reader, &mut sink()).await;
+            reader
+        },
         async move {
             let _ = writer
                 .write(
@@ -98,11 +102,10 @@ async fn handle_request(stream: &mut TlsStream<TcpStream>) {
                     ",
                 )
                 .await;
-        },
-        async move {
-            let _ = copy(&mut reader, &mut sink()).await;
+            writer
         }
     );
+    let mut stream = reader.unsplit(writer);
     let _ = stream.shutdown().await;
 }
 
@@ -124,7 +127,7 @@ impl ResolvesServerCert for CertResolver {
                 self.challenge_key
                     .read()
                     .ok()
-                    .and_then(|lock| lock.as_ref().map(|key| key.clone()))
+                    .and_then(|lock| lock.as_ref().cloned())
             } else {
                 self.key.read().ok().map(|key| key.clone())
             }

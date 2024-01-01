@@ -1,10 +1,26 @@
 use crate::csr::Csr;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {
+pub struct Error {
+    pub kind: ErrorKind,
+    pub cause: Option<ErrorDetail>,
+}
+
+#[derive(Debug)]
+pub enum ErrorDetail {
+    Error(Box<Error>),
+    Message(String),
+}
+
+#[derive(Debug)]
+pub enum ErrorKind {
+    ConnectionError,
+    TooManyRequests,
+    ServiceUnavailable,
+    DeserializationError { type_name: String },
     FetchDirectory { url: String },
     InvalidKey,
     NewNonce,
@@ -18,39 +34,98 @@ pub enum Error {
     GetAuthorization,
     InvalidAuthorization,
     GetOrder,
-    FinalizeOrder { csr: Csr },
-    DownloadCertificate { csr: Csr },
+    FinalizeOrder,
+    DownloadCertificate,
     OrderProcessing { csr: Csr },
+}
+
+impl From<ErrorKind> for Error {
+    fn from(value: ErrorKind) -> Self {
+        Self {
+            kind: value,
+            cause: None,
+        }
+    }
+}
+
+impl ErrorKind {
+    pub fn wrap(self, err: Error) -> Error {
+        Error {
+            kind: self,
+            cause: Some(ErrorDetail::Error(Box::new(err))),
+        }
+    }
+    pub fn with_msg(self, msg: impl Into<String>) -> Error {
+        Error {
+            kind: self,
+            cause: Some(ErrorDetail::Message(msg.into())),
+        }
+    }
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let message = vec![
+            Some(self.kind.to_string()),
+            self.cause.as_ref().map(|it| it.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(":\n");
+        f.write_str(&message)
+    }
+}
+
+impl Display for ErrorDetail {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::FetchDirectory { ref url } => {
+            ErrorDetail::Error(err) => write!(f, "{}", err),
+            ErrorDetail::Message(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl Display for ErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorKind::ConnectionError => {
+                write!(f, "could not connect to acme server")
+            }
+            ErrorKind::TooManyRequests => {
+                write!(f, "too many requests to acme server")
+            }
+            ErrorKind::ServiceUnavailable => {
+                write!(f, "acme service not available")
+            }
+            ErrorKind::DeserializationError { type_name } => {
+                write!(f, "failed to deserialize to {}", type_name)
+            }
+            ErrorKind::FetchDirectory { ref url } => {
                 write!(f, "could not fetch ACME directory at {url}")
             }
-            Error::InvalidKey => {
+            ErrorKind::InvalidKey => {
                 write!(
                     f,
                     "invalid pkcs8 (the key should be ECDSA_P256_SHA256_FIXED_SIGNING)"
                 )
             }
-            Error::NewNonce => {
+            ErrorKind::NewNonce => {
                 write!(f, "could not get a new nonce")
             }
-            Error::NewAccount => {
+            ErrorKind::NewAccount => {
                 write!(f, "could not create account")
             }
-            Error::DeserializeAccount => {
+            ErrorKind::DeserializeAccount => {
                 write!(f, "could not deserialize account")
             }
-            Error::GetAccount => {
+            ErrorKind::GetAccount => {
                 write!(f, "could not get account")
             }
-            Error::ChangeAccountKey => {
+            ErrorKind::ChangeAccountKey => {
                 write!(f, "could not change account key")
             }
-            Error::Csr { ref domains } => {
+            ErrorKind::Csr { ref domains } => {
                 write!(
                     f,
                     "could not generate CSR for domains: {}",
@@ -61,10 +136,10 @@ impl Display for Error {
                         .join(", ")
                 )
             }
-            Error::NewOrder => {
+            ErrorKind::NewOrder => {
                 write!(f, "could not get or create new order")
             }
-            Error::InvalidOrder { ref domains } => {
+            ErrorKind::InvalidOrder { ref domains } => {
                 write!(
                     f,
                     "invalid order for domains: {}",
@@ -75,22 +150,22 @@ impl Display for Error {
                         .join(", ")
                 )
             }
-            Error::GetAuthorization => {
+            ErrorKind::GetAuthorization => {
                 write!(f, "could not get authorization challenges")
             }
-            Error::InvalidAuthorization => {
+            ErrorKind::InvalidAuthorization => {
                 write!(f, "invalid authorization")
             }
-            Error::GetOrder => {
+            ErrorKind::GetOrder => {
                 write!(f, "could not get order")
             }
-            Error::DownloadCertificate { .. } => {
+            ErrorKind::DownloadCertificate => {
                 write!(f, "failed to download certificate")
             }
-            Error::FinalizeOrder { .. } => {
+            ErrorKind::FinalizeOrder => {
                 write!(f, "failed to finalize order")
             }
-            Error::OrderProcessing { .. } => {
+            ErrorKind::OrderProcessing { .. } => {
                 write!(f, "order processing stalled")
             }
         }

@@ -1,5 +1,5 @@
 use crate::client::{HttpClient, Response};
-use crate::errors::{Error, Result};
+use crate::errors::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -17,25 +17,24 @@ pub struct Directory {
 }
 
 impl Directory {
-    pub(crate) async fn from<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn from<C: HttpClient<R>, R: Response>(
         directory_url: impl AsRef<str>,
         client: &C,
     ) -> Result<Self> {
         let directory_url = directory_url.as_ref();
-        let response =
-            client
-                .get_request(directory_url)
-                .await
-                .map_err(|_| Error::FetchDirectory {
-                    url: directory_url.to_string(),
-                })?;
+        let response = client.get_request(directory_url).await.map_err(|err| {
+            ErrorKind::FetchDirectory {
+                url: directory_url.to_string(),
+            }
+            .wrap(err)
+        })?;
         if response.is_success() {
-            response
-                .body_as_json::<Directory>()
-                .await
-                .map_err(|_| Error::FetchDirectory {
+            response.body_as_json::<Directory>().await.map_err(|err| {
+                ErrorKind::FetchDirectory {
                     url: directory_url.to_string(),
-                })
+                }
+                .wrap(err)
+            })
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
@@ -43,12 +42,13 @@ impl Directory {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::FetchDirectory {
+            Err(ErrorKind::FetchDirectory {
                 url: directory_url.to_string(),
-            })
+            }
+            .into())
         }
     }
-    pub(crate) async fn new_nonce<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn new_nonce<C: HttpClient<R>, R: Response>(
         &self,
         client: &C,
     ) -> Result<String> {
@@ -56,11 +56,11 @@ impl Directory {
         let response = client
             .get_request(nounce_url)
             .await
-            .map_err(|_| Error::NewNonce)?;
+            .map_err(|err| ErrorKind::NewNonce.wrap(err))?;
         if response.is_success() {
             let nonce = response
                 .header_value("replay-nonce")
-                .ok_or(Error::NewNonce)?;
+                .ok_or::<Error>(ErrorKind::NewNonce.into())?;
             let _ = response.body_as_bytes().await;
             Ok(nonce)
         } else {
@@ -70,7 +70,7 @@ impl Directory {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::NewNonce)
+            Err(ErrorKind::NewNonce.into())
         }
     }
 }

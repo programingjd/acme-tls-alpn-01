@@ -1,12 +1,12 @@
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
-use crate::errors::Error::DeserializeAccount;
-use crate::errors::{Error, Result};
+use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
 use ring::signature::EcdsaKeyPair;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fmt::{Display, Formatter};
 
 #[derive(Serialize)]
 pub struct AccountMaterial {
@@ -37,9 +37,19 @@ pub(crate) enum AccountStatus {
     #[serde(rename = "valid")]
     Valid,
     #[serde(rename = "deactivated")]
-    Deactivated {},
+    Deactivated,
     #[serde(rename = "revoked")]
-    Revoked {},
+    Revoked,
+}
+
+impl Display for AccountStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccountStatus::Valid => f.write_str("valid"),
+            AccountStatus::Deactivated => f.write_str("deactivated"),
+            AccountStatus::Revoked => f.write_str("revoked"),
+        }
+    }
 }
 
 impl TryFrom<PackedAccountMaterial> for AccountMaterial {
@@ -66,14 +76,14 @@ impl AccountMaterial {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap()
     }
-    pub async fn from_json<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub async fn from_json<C: HttpClient<R>, R: Response>(
         json: impl AsRef<str>,
         contact_email: impl AsRef<str>,
         directory: &Directory,
         client: &C,
     ) -> Result<AccountMaterial> {
         let account: AccountMaterial = serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
-            .map_err(|_| DeserializeAccount)
+            .map_err(|_| ErrorKind::DeserializeAccount.into())
             .and_then(|it| it.try_into())?;
         let nonce = directory.new_nonce(client).await?;
         let payload = json!({
@@ -89,13 +99,13 @@ impl AccountMaterial {
         let response = client
             .post_jose(&account.url, &body)
             .await
-            .map_err(|_| Error::GetAccount)?;
+            .map_err(|err| ErrorKind::GetAccount.wrap(err))?;
         match response.status_code() {
             200 => {
                 let status = response
                     .body_as_json::<Account>()
                     .await
-                    .map_err(|_| Error::GetAccount)?
+                    .map_err(|err| ErrorKind::GetAccount.wrap(err))?
                     .status;
                 match status {
                     AccountStatus::Valid => {
@@ -104,7 +114,7 @@ impl AccountMaterial {
                             .await?;
                         Ok(account)
                     }
-                    _ => Err(Error::GetAccount),
+                    _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {}", status))),
                 }
             }
             403 => {
@@ -136,11 +146,11 @@ impl AccountMaterial {
                 }
                 #[cfg(not(debug_assertions))]
                 let _ = response.body_as_text();
-                Err(Error::GetAccount)
+                Err(ErrorKind::GetAccount.into())
             }
         }
     }
-    pub async fn from_pkcs8<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub async fn from_pkcs8<C: HttpClient<R>, R: Response>(
         pkcs8: Vec<u8>,
         contact_email: impl AsRef<str>,
         directory: &Directory,
@@ -149,7 +159,7 @@ impl AccountMaterial {
         let keypair = keypair_from_pkcs8(&pkcs8)?;
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
-    pub(crate) async fn from<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn from<C: HttpClient<R>, R: Response>(
         contact_email: impl AsRef<str>,
         directory: &Directory,
         client: &C,
@@ -158,7 +168,7 @@ impl AccountMaterial {
         let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
-    pub async fn update_contact<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub async fn update_contact<C: HttpClient<R>, R: Response>(
         &self,
         contact_email: impl AsRef<str>,
         directory: &Directory,
@@ -179,16 +189,16 @@ impl AccountMaterial {
         let response = client
             .post_jose(&self.url, &body)
             .await
-            .map_err(|_| Error::GetAccount)?;
+            .map_err(|err| ErrorKind::GetAccount.wrap(err))?;
         if response.is_success() {
             let status = response
                 .body_as_json::<Account>()
                 .await
-                .map_err(|_| Error::NewAccount)?
+                .map_err(|err| ErrorKind::NewAccount.wrap(err))?
                 .status;
             match status {
                 AccountStatus::Valid => Ok(()),
-                _ => Err(Error::GetAccount),
+                _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {}", status))),
             }
         } else {
             #[cfg(debug_assertions)]
@@ -197,10 +207,10 @@ impl AccountMaterial {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::GetAccount)
+            Err(ErrorKind::GetAccount.into())
         }
     }
-    pub async fn update_key<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub async fn update_key<C: HttpClient<R>, R: Response>(
         &self,
         directory: &Directory,
         client: &C,
@@ -223,19 +233,22 @@ impl AccountMaterial {
         let response = client
             .post_jose(&directory.key_change, &body)
             .await
-            .map_err(|_| Error::ChangeAccountKey)?;
+            .map_err(|err| ErrorKind::ChangeAccountKey.wrap(err))?;
         if response.is_success() {
             let account = response
                 .body_as_json::<Account>()
                 .await
-                .map_err(|_| Error::ChangeAccountKey)?;
+                .map_err(|err| ErrorKind::ChangeAccountKey.wrap(err))?;
             match account.status {
                 AccountStatus::Valid { .. } => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
                     url: self.url.clone(),
                 }),
-                _ => Err(Error::ChangeAccountKey),
+                _ => {
+                    Err(ErrorKind::ChangeAccountKey
+                        .with_msg(format!("account is {}", account.status)))
+                }
             }
         } else {
             #[cfg(debug_assertions)]
@@ -244,10 +257,10 @@ impl AccountMaterial {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::ChangeAccountKey)
+            Err(ErrorKind::ChangeAccountKey.into())
         }
     }
-    async fn new_account<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    async fn new_account<C: HttpClient<R>, R: Response>(
         pkcs8: Vec<u8>,
         keypair: EcdsaKeyPair,
         contact_email: impl AsRef<str>,
@@ -269,20 +282,22 @@ impl AccountMaterial {
         let response = client
             .post_jose(&directory.new_account, &body)
             .await
-            .map_err(|_| Error::NewAccount)?;
+            .map_err(|err| ErrorKind::NewAccount.wrap(err))?;
         if response.is_success() {
-            let kid = response.header_value("location").ok_or(Error::NewAccount)?;
+            let kid = response
+                .header_value("location")
+                .ok_or(ErrorKind::NewAccount.with_msg("could not get account kid"))?;
             let account = response
                 .body_as_json::<Account>()
                 .await
-                .map_err(|_| Error::NewAccount)?;
+                .map_err(|err| ErrorKind::NewAccount.wrap(err))?;
             match account.status {
                 AccountStatus::Valid { .. } => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
                     url: kid,
                 }),
-                _ => Err(Error::NewAccount),
+                _ => Err(ErrorKind::NewAccount.with_msg(format!("account is {}", account.status))),
             }
         } else {
             #[cfg(debug_assertions)]
@@ -291,7 +306,7 @@ impl AccountMaterial {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::NewAccount)
+            Err(ErrorKind::NewAccount.into())
         }
     }
 }
@@ -334,7 +349,7 @@ mod test {
         println!("{json}");
         let deserialized: AccountMaterial =
             serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
-                .map_err(|_| DeserializeAccount)
+                .map_err(|_| ErrorKind::DeserializeAccount.into())
                 .and_then(|it| it.try_into())
                 .unwrap();
         assert_eq!(deserialized.url, kid);

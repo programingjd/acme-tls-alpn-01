@@ -3,7 +3,6 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Result;
 use crate::order::LocatedOrder;
-use std::error::Error;
 use std::marker::PhantomData;
 
 mod account;
@@ -27,13 +26,11 @@ pub extern crate reqwest;
 pub extern crate rcgen;
 
 #[cfg(feature = "reqwest")]
-pub struct Acme<R, E, C = reqwest::Client>
+pub struct Acme<R, C = reqwest::Client>
 where
-    E: Error,
-    R: Response<E>,
-    C: HttpClient<R, E>,
+    R: Response,
+    C: HttpClient<R>,
 {
-    _e: PhantomData<E>,
     _r: PhantomData<R>,
     client: C,
 }
@@ -48,7 +45,7 @@ where
     client: C,
 }
 
-impl<C: HttpClient<R, E>, R: Response<E>, E: Error> Acme<R, E, C> {
+impl<C: HttpClient<R>, R: Response> Acme<R, C> {
     pub async fn directory(&self, directory_url: impl AsRef<str>) -> Result<Directory> {
         Directory::from(directory_url, &self.client).await
     }

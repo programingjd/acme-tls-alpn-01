@@ -4,12 +4,13 @@ use crate::challenge::ChallengeType;
 use crate::client::{HttpClient, Response};
 use crate::csr::Csr;
 use crate::directory::Directory;
-use crate::errors::{Error, Result};
+use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
 use base64::Engine;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -42,6 +43,18 @@ pub(crate) enum OrderStatus {
     Processing,
 }
 
+impl Display for OrderStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrderStatus::Pending => f.write_str("pending"),
+            OrderStatus::Ready => f.write_str("ready"),
+            OrderStatus::Valid { .. } => f.write_str("valid"),
+            OrderStatus::Invalid => f.write_str("invalid"),
+            OrderStatus::Processing => f.write_str("processing"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "type", content = "value")]
 pub enum Identifier {
@@ -50,7 +63,7 @@ pub enum Identifier {
 }
 
 impl LocatedOrder {
-    pub(crate) async fn new_order<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn new_order<C: HttpClient<R>, R: Response>(
         domain_names: impl Iterator<Item = impl Into<String>>,
         account: &AccountMaterial,
         directory: &Directory,
@@ -75,13 +88,15 @@ impl LocatedOrder {
         let response = client
             .post_jose(&directory.new_order, &body)
             .await
-            .map_err(|_| Error::NewOrder)?;
+            .map_err(|err| ErrorKind::NewOrder.wrap(err))?;
         if response.is_success() {
-            let url = response.header_value("location").ok_or(Error::NewOrder)?;
+            let url = response
+                .header_value("location")
+                .ok_or::<Error>(ErrorKind::NewOrder.into())?;
             let order = response
                 .body_as_json::<Order>()
                 .await
-                .map_err(|_| Error::NewOrder)?;
+                .map_err(|err| ErrorKind::NewOrder.wrap(err))?;
             Ok(LocatedOrder { url, order })
         } else {
             #[cfg(debug_assertions)]
@@ -90,10 +105,10 @@ impl LocatedOrder {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::NewOrder)
+            Err(ErrorKind::NewOrder.into())
         }
     }
-    pub(crate) async fn process<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    pub(crate) async fn process<C: HttpClient<R>, R: Response>(
         self,
         account: &AccountMaterial,
         directory: &Directory,
@@ -101,12 +116,18 @@ impl LocatedOrder {
     ) -> Result<String> {
         match self.retry(account, directory, client, None).await {
             Ok(it) => Ok(it),
-            Err(Error::OrderProcessing { csr }) => {
+            Err(Error {
+                kind: ErrorKind::OrderProcessing { csr },
+                ..
+            }) => {
                 Delay::new(Duration::from_secs(10u64)).await;
                 let order = Self::try_get(self.url, account, directory, client).await?;
                 match order.retry(account, directory, client, Some(csr)).await {
                     Ok(it) => Ok(it),
-                    Err(Error::OrderProcessing { csr }) => {
+                    Err(Error {
+                        kind: ErrorKind::OrderProcessing { csr },
+                        ..
+                    }) => {
                         Delay::new(Duration::from_secs(150u64)).await;
                         Self::try_get(order.url, account, directory, client)
                             .await?
@@ -119,7 +140,7 @@ impl LocatedOrder {
             Err(err) => Err(err),
         }
     }
-    async fn try_get<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    async fn try_get<C: HttpClient<R>, R: Response>(
         url: String,
         account: &AccountMaterial,
         directory: &Directory,
@@ -136,12 +157,12 @@ impl LocatedOrder {
         let response = client
             .post_jose(&url, &body)
             .await
-            .map_err(|_| Error::GetOrder)?;
+            .map_err(|err| ErrorKind::GetOrder.wrap(err))?;
         if response.is_success() {
             let order = response
                 .body_as_json::<Order>()
                 .await
-                .map_err(|_| Error::GetOrder)?;
+                .map_err(|err| ErrorKind::GetOrder.wrap(err))?;
             Ok(LocatedOrder { url, order })
         } else {
             #[cfg(debug_assertions)]
@@ -150,10 +171,10 @@ impl LocatedOrder {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::GetOrder)
+            Err(ErrorKind::GetOrder.into())
         }
     }
-    async fn retry<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    async fn retry<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
         directory: &Directory,
@@ -161,7 +182,7 @@ impl LocatedOrder {
         csr: Option<Csr>,
     ) -> Result<String> {
         match &self.order.status {
-            OrderStatus::Invalid => Err(Error::InvalidOrder {
+            OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
                 domains: self
                     .order
                     .identifiers
@@ -170,7 +191,8 @@ impl LocatedOrder {
                         Identifier::Dns(name) => name.clone(),
                     })
                     .collect(),
-            }),
+            }
+            .into()),
             OrderStatus::Ready => self.finalize(account, directory, client).await,
             OrderStatus::Valid {
                 certificate: url, ..
@@ -178,14 +200,14 @@ impl LocatedOrder {
                 if let Some(csr) = csr {
                     Self::download_certificate(url, &csr, account, directory, client).await
                 } else {
-                    Err(Error::NewOrder)
+                    Err(ErrorKind::NewOrder.into())
                 }
             }
             OrderStatus::Processing => {
                 if let Some(csr) = csr {
-                    Err(Error::OrderProcessing { csr })
+                    Err(ErrorKind::OrderProcessing { csr }.into())
                 } else {
-                    Err(Error::NewOrder)
+                    Err(ErrorKind::NewOrder.into())
                 }
             }
             OrderStatus::Pending => {
@@ -202,7 +224,7 @@ impl LocatedOrder {
                         AuthorizationStatus::Valid | AuthorizationStatus::Pending
                     )
                 }) {
-                    return Err(Error::InvalidAuthorization);
+                    return Err(ErrorKind::InvalidAuthorization.into());
                 }
                 let _pending_challenges = authorizations.into_iter().flat_map(|authorization| {
                     match authorization.status {
@@ -219,7 +241,7 @@ impl LocatedOrder {
             }
         }
     }
-    async fn finalize<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    async fn finalize<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
         directory: &Directory,
@@ -251,12 +273,12 @@ impl LocatedOrder {
         let response = client
             .post_jose(&url, &body)
             .await
-            .map_err(|_| Error::FinalizeOrder { csr: csr.clone() })?;
+            .map_err(|err| ErrorKind::FinalizeOrder.wrap(err))?;
         if response.is_success() {
             let order = response
                 .body_as_json::<Order>()
                 .await
-                .map_err(|_| Error::FinalizeOrder { csr: csr.clone() })?;
+                .map_err(|err| ErrorKind::FinalizeOrder.wrap(err))?;
             todo!()
         } else {
             #[cfg(debug_assertions)]
@@ -265,10 +287,10 @@ impl LocatedOrder {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::FinalizeOrder { csr: csr.clone() })
+            Err(ErrorKind::FinalizeOrder.into())
         }
     }
-    async fn download_certificate<C: HttpClient<R, E>, R: Response<E>, E: std::error::Error>(
+    async fn download_certificate<C: HttpClient<R>, R: Response>(
         url: impl AsRef<str>,
         csr: &Csr,
         account: &AccountMaterial,
@@ -287,13 +309,13 @@ impl LocatedOrder {
         let response = client
             .post_jose(&url, &body)
             .await
-            .map_err(|_| Error::DownloadCertificate { csr: csr.clone() })?;
+            .map_err(|err| ErrorKind::DownloadCertificate.wrap(err))?;
         if response.is_success() {
             let pem_certificate_chain = response
                 .body_as_text()
                 .await
-                .map_err(|_| Error::DownloadCertificate { csr: csr.clone() })?;
-            Ok(vec![csr.private_key_pem.clone(), pem_certificate_chain].join("\n"))
+                .map_err(|err| ErrorKind::DownloadCertificate.wrap(err))?;
+            Ok([csr.private_key_pem.clone(), pem_certificate_chain].join("\n"))
         } else {
             #[cfg(debug_assertions)]
             if let Ok(text) = response.body_as_text().await {
@@ -301,7 +323,7 @@ impl LocatedOrder {
             }
             #[cfg(not(debug_assertions))]
             let _ = response.body_as_text();
-            Err(Error::DownloadCertificate { csr: csr.clone() })
+            Err(ErrorKind::DownloadCertificate.into())
         }
     }
 }
