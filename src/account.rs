@@ -74,7 +74,7 @@ impl From<AccountMaterial> for PackedAccountMaterial {
 
 impl AccountMaterial {
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        serde_json::to_string(self).expect("failed to serialize account material")
     }
     pub async fn from_json<C: HttpClient<R>, R: Response>(
         json: impl AsRef<str>,
@@ -165,7 +165,7 @@ impl AccountMaterial {
         client: &C,
     ) -> Result<Self> {
         let pkcs8 = generate_pkcs8_ecdsa_keypair();
-        let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
+        let keypair = keypair_from_pkcs8(&pkcs8).expect("failed to extract keypair");
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
     pub async fn update_contact<C: HttpClient<R>, R: Response>(
@@ -216,7 +216,7 @@ impl AccountMaterial {
         client: &C,
     ) -> Result<Self> {
         let pkcs8 = generate_pkcs8_ecdsa_keypair();
-        let keypair = keypair_from_pkcs8(&pkcs8).unwrap();
+        let keypair = keypair_from_pkcs8(&pkcs8).expect("failed to extract keypair");
         let nonce = directory.new_nonce(client).await?;
         let payload = json!({
             "account": &self.url,

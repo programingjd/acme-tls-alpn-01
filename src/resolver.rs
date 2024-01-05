@@ -1,5 +1,5 @@
 use flashmap::{ReadHandle, WriteHandle};
-use futures_channel::oneshot::Sender;
+use flume::Sender;
 use rustls::crypto::ring::sign::any_supported_type;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::server::{ClientHello, ResolvesServerCert};
@@ -50,20 +50,36 @@ impl CertResolver {
 impl ResolvesServerCert for CertResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         if let Some(server_name) = client_hello.server_name() {
-            let guard = self.reader.guard();
-            if let Some(resolver) = guard.get(server_name) {
-                return if client_hello
-                    .alpn()
-                    .and_then(|mut it| it.find(|&it| it == b"acme-tls/1"))
-                    .is_some()
-                {
-                    resolver.challenge_key.clone()
+            if client_hello
+                .alpn()
+                .and_then(|mut it| it.find(|&it| it == b"acme-tls/1"))
+                .is_some()
+            {
+                let guard = self.reader.guard();
+                if let Some(resolver) = guard.get(server_name) {
+                    match &resolver.challenge_key {
+                        Some(key) => {
+                            if let Some(ref notifier) = resolver.notifier {
+                                let _ = notifier.try_send(server_name.to_string());
+                            }
+                            Some(key.clone())
+                        }
+                        None => None,
+                    }
                 } else {
+                    None
+                }
+            } else {
+                let guard = self.reader.guard();
+                if let Some(resolver) = guard.get(server_name) {
                     Some(resolver.key.clone())
-                };
+                } else {
+                    None
+                }
             }
+        } else {
+            None
         }
-        None
     }
 }
 

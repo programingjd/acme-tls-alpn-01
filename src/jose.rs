@@ -1,5 +1,6 @@
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine;
+use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use serde::Serialize;
@@ -28,7 +29,8 @@ pub(crate) fn jose(
         nonce,
         url,
     };
-    let protected = BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(&protected).unwrap());
+    let protected = BASE64_URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&protected).expect("failed to serialize jose"));
     let payload = match payload {
         Some(payload) => BASE64_URL_SAFE_NO_PAD.encode(payload.to_string()),
         None => String::new(),
@@ -36,14 +38,14 @@ pub(crate) fn jose(
     let message = format!("{}.{}", protected, payload);
     let signature = keypair
         .sign(&SystemRandom::new(), message.as_bytes())
-        .unwrap();
+        .expect("failed to sign message");
     let signature = BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref());
     let body = Body {
         protected,
         payload,
         signature,
     };
-    serde_json::to_value(body).unwrap()
+    serde_json::to_value(body).expect("failed to serialize jose")
 }
 
 pub(crate) fn jwk(keypair: &EcdsaKeyPair) -> Jwk {
@@ -67,6 +69,21 @@ pub(crate) struct Jwk {
     u: &'static str,
     x: String,
     y: String,
+}
+
+impl Jwk {
+    pub(crate) fn thumbprint(&self) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(digest(
+            &SHA256,
+            &serde_json::to_vec(&JwkThumb {
+                crv: self.crv,
+                kty: self.kty,
+                x: &self.x,
+                y: &self.y,
+            })
+            .expect("failed to serialize JwkThumb"),
+        ))
+    }
 }
 
 #[derive(Serialize)]

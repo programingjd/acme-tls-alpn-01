@@ -1,6 +1,6 @@
 use crate::account::AccountMaterial;
 use crate::authorization::{Authorization, AuthorizationStatus};
-use crate::challenge::ChallengeType;
+use crate::challenge::{Challenge, ChallengeStatus, ChallengeType};
 use crate::client::{HttpClient, Response};
 use crate::csr::Csr;
 use crate::directory::Directory;
@@ -11,7 +11,7 @@ use base64::Engine;
 use flashmap::WriteHandle;
 use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
-use futures::{channel, StreamExt};
+use futures::StreamExt;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -240,24 +240,41 @@ impl LocatedOrder {
                 }
                 let mut pending_challenges = FuturesUnordered::<_>::new();
                 let mut guard = writer.guard();
-                authorizations.into_iter().for_each(|authorization| {
+                for authorization in authorizations {
                     let Identifier::Dns(ref domain_name) = authorization.identifier;
                     if matches!(authorization.status, AuthorizationStatus::Pending) {
-                        authorization.challenges.into_iter().for_each(|ref it| {
-                            if matches!(it.kind, ChallengeType::TlsAlpn01) {
+                        for ref challenge in authorization.challenges {
+                            if matches!(challenge.kind, ChallengeType::TlsAlpn01) {
                                 let resolver = guard.get(domain_name).unwrap();
-                                let (sender, receiver) = channel::oneshot::channel();
+                                let (sender, receiver) = flume::bounded(1);
                                 let resolver = DomainResolver {
                                     key: Arc::new(resolver.key.as_ref().clone()),
-                                    challenge_key: None, // TODO
+                                    challenge_key: Some(Arc::new(Challenge::certificate(
+                                        domain_name,
+                                        challenge.authorization_key(account),
+                                    )?)),
                                     notifier: Some(sender),
                                 };
                                 guard.insert(domain_name.clone(), resolver);
-                                pending_challenges.push(receiver);
+                                match challenge.accept(account, directory, client).await?.status {
+                                    ChallengeStatus::Processing => {
+                                        pending_challenges.push(receiver.into_recv_async())
+                                    }
+                                    ChallengeStatus::Valid => {}
+                                    ChallengeStatus::Invalid => {
+                                        return Err(
+                                            ErrorKind::Challenge.with_msg("challenge is invalid")
+                                        )
+                                    }
+                                    ChallengeStatus::Pending => {
+                                        return Err(ErrorKind::Challenge
+                                            .with_msg("challenge is still pending"))
+                                    }
+                                }
                             }
-                        });
+                        }
                     }
-                });
+                }
                 let mut delay = Delay::new(Duration::from_secs(120));
                 loop {
                     let next = pending_challenges.next();
@@ -275,6 +292,7 @@ impl LocatedOrder {
                         }
                     }
                 }
+
                 todo!("wait for order authorizations to be valid and then finalize")
             }
         }

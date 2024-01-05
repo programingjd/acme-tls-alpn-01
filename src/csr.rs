@@ -12,7 +12,7 @@ impl TryFrom<Vec<String>> for Csr {
     type Error = Error;
     fn try_from(domain_names: Vec<String>) -> Result<Self> {
         let pkcs8 = generate_pkcs8_ecdsa_keypair();
-        let keypair = KeyPair::try_from(pkcs8).unwrap();
+        let keypair = KeyPair::try_from(pkcs8).expect("failed to extract keypair");
         let mut params = CertificateParams::new(domain_names.clone());
         params.alg = &PKCS_ECDSA_P256_SHA256;
         params.key_pair = Some(keypair);
