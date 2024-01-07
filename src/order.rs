@@ -130,6 +130,11 @@ impl LocatedOrder {
             Err(ErrorKind::NewOrder.into())
         }
     }
+    /// Process the order: get the authorization challenges,
+    /// setup the resolver to respond to those challenges,
+    /// notify the ACME server to validate them,
+    /// wait for the ACME server validation to be done,
+    /// finalize the order and download the certificate.
     #[cfg(feature = "tracing")]
     #[tracing::instrument(
         name = "process_order",
@@ -144,6 +149,12 @@ impl LocatedOrder {
         writer: &mut WriteHandle<String, DomainResolver, RandomState>,
         client: &C,
     ) -> Result<String> {
+        // Once all the order has been finalized, the order might stay
+        // in the processing state for a little while.
+        // If that is the case, we wait for 10s, then retrieve the
+        // order status again. If it is still processing, then we
+        // wait for another 2:30s and retrieve the order status one
+        // last time. If it is still processing then we give up.
         match self.retry(account, directory, writer, client, None).await {
             Ok(it) => Ok(it),
             Err(Error {
@@ -177,6 +188,7 @@ impl LocatedOrder {
             Err(err) => Err(err),
         }
     }
+    /// Poll for the order status.
     #[cfg(feature = "tracing")]
     #[tracing::instrument(
         name = "get_order",
@@ -218,6 +230,14 @@ impl LocatedOrder {
             Err(ErrorKind::GetOrder.into())
         }
     }
+    /// Take appropriate steps based on the order status:
+    /// - if the status is pending:
+    ///   setup the resolver to respond to the challenges, notify the acme server, wait for the validations and then
+    ///   finalize the order and download the certificate
+    /// - if the status is ready:
+    ///   finalize the order and download the certificate
+    /// - if the status is valid:
+    ///   download the certificate
     async fn retry<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
@@ -227,6 +247,7 @@ impl LocatedOrder {
         csr: Option<Csr>,
     ) -> Result<String> {
         match &self.order.status {
+            // Unrecoverable error
             OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
                 domains: self
                     .order
@@ -238,16 +259,17 @@ impl LocatedOrder {
                     .collect(),
             }
             .into()),
+            // Ready to finalize and download the certificate
             OrderStatus::Ready => self.finalize(account, directory, client).await,
-            OrderStatus::Valid {
-                certificate: url, ..
-            } => {
+            // Ready to download the certificate
+            OrderStatus::Valid { certificate: url } => {
                 if let Some(csr) = csr {
                     Self::download_certificate(url, &csr, account, directory, client).await
                 } else {
                     Err(ErrorKind::NewOrder.into())
                 }
             }
+            // Still processing, will be retried unless we already retried too many times.
             OrderStatus::Processing => {
                 if let Some(csr) = csr {
                     Err(ErrorKind::OrderProcessing { csr }.into())
@@ -255,7 +277,9 @@ impl LocatedOrder {
                     Err(ErrorKind::NewOrder.into())
                 }
             }
+            // Waiting the for the authorization challenges to be validated.
             OrderStatus::Pending => {
+                // Get the challenges for all the authorizations.
                 let futures: Vec<_> = self
                     .order
                     .authorizations
@@ -263,6 +287,7 @@ impl LocatedOrder {
                     .map(|url| Authorization::authorize(url, account, directory, client))
                     .collect();
                 let authorizations = futures::future::try_join_all(futures).await?;
+                // We can stop early if one of the authorizations failed.
                 if authorizations.iter().any(|it| {
                     !matches!(
                         it.status,
@@ -271,6 +296,8 @@ impl LocatedOrder {
                 }) {
                     return Err(ErrorKind::InvalidAuthorization.into());
                 }
+                // Gather all the pending authorizations, and for each of them, select the tls-alpn-01 challenge
+                // and setup the resolver to respond to the validation request.
                 let mut pending_challenges = FuturesUnordered::<_>::new();
                 let mut guard = writer.guard();
                 for authorization in authorizations {
@@ -308,8 +335,8 @@ impl LocatedOrder {
                         }
                     }
                 }
-                #[cfg(feature = "tracing")]
-                debug!("waiting 120s before checking challenge status again");
+                // Wait for the ACME server to call our server for all the pending challenges.
+                // Timeout after 2 mins.
                 let mut delay = Delay::new(Duration::from_secs(120));
                 loop {
                     let next = pending_challenges.next();
@@ -328,11 +355,93 @@ impl LocatedOrder {
                     }
                 }
 
-                todo!("wait for order authorizations to be valid and then finalize")
+                // The order status might stay pending for a little while.
+                // If that's the case, we wait for 10s and check again.
+                // If the status is still pending, we wait for 2:30s and check
+                // one last time. If the status is still pending then we give up.
+                return match Self::try_get(self.url.clone(), account, directory, client)
+                    .await?
+                    .order
+                    .status
+                {
+                    // Unrecoverable error
+                    OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
+                        domains: self
+                            .order
+                            .identifiers
+                            .iter()
+                            .map(|it| match it {
+                                Identifier::Dns(name) => name.clone(),
+                            })
+                            .collect(),
+                    }
+                    .into()),
+
+                    // Ready to finalize and download the certificate
+                    OrderStatus::Ready => self.finalize(account, directory, client).await,
+                    // Still pending
+                    OrderStatus::Pending => {
+                        #[cfg(feature = "tracing")]
+                        debug!("waiting 10s before checking order status again");
+                        Delay::new(Duration::from_secs(10u64)).await;
+                        match Self::try_get(self.url.clone(), account, directory, client)
+                            .await?
+                            .order
+                            .status
+                        {
+                            // Unrecoverable error
+                            OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
+                                domains: self
+                                    .order
+                                    .identifiers
+                                    .iter()
+                                    .map(|it| match it {
+                                        Identifier::Dns(name) => name.clone(),
+                                    })
+                                    .collect(),
+                            }
+                            .into()),
+                            // Ready to finalize and download the certificate
+                            OrderStatus::Ready => self.finalize(account, directory, client).await,
+                            // Still pending
+                            OrderStatus::Pending => {
+                                #[cfg(feature = "tracing")]
+                                debug!("waiting 150s before checking order status again");
+                                Delay::new(Duration::from_secs(150u64)).await;
+                                match Self::try_get(self.url.clone(), account, directory, client)
+                                    .await?
+                                    .order
+                                    .status
+                                {
+                                    // Unrecoverable error
+                                    OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
+                                        domains: self
+                                            .order
+                                            .identifiers
+                                            .iter()
+                                            .map(|it| match it {
+                                                Identifier::Dns(name) => name.clone(),
+                                            })
+                                            .collect(),
+                                    }
+                                    .into()),
+                                    // Ready to finalize and download the certificate
+                                    OrderStatus::Ready => {
+                                        self.finalize(account, directory, client).await
+                                    }
+                                    _ => Err(ErrorKind::NewOrder.into()),
+                                }
+                            }
+                            _ => Err(ErrorKind::NewOrder.into()),
+                        }
+                    }
+                    _ => Err(ErrorKind::NewOrder.into()),
+                };
             }
         }
     }
     /// [RFC 8555 Finalizing the Order](https://datatracker.ietf.org/doc/html/rfc8555#section-page-46)
+    /// and if successful download the certificate.
     #[cfg(feature = "tracing")]
     #[tracing::instrument(
         name = "finalize_order",

@@ -68,9 +68,11 @@ impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
 }
 
 impl<C: HttpClient<R>, R: Response> Acme<R, C> {
+    /// Retrieve the ACME directory at the specified url.
     pub async fn directory(&self, directory_url: impl AsRef<str> + Debug) -> Result<Directory> {
         Directory::from(directory_url, &self.client).await
     }
+    /// Create a new account with the specified contact email.
     pub async fn new_account(
         &self,
         contact_email: impl AsRef<str>,
@@ -78,6 +80,7 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
     ) -> Result<AccountMaterial> {
         AccountMaterial::from(contact_email, directory, &self.client).await
     }
+    /// Request a new certificate and update the resolver.
     pub async fn request_certificates(
         &mut self,
         account: &AccountMaterial,
