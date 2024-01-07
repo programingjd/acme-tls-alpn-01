@@ -42,7 +42,7 @@ where
     _r: PhantomData<R>,
     client: C,
     domains: Vec<String>,
-    resolver: CertResolver,
+    pub resolver: CertResolver,
     writer: WriteHandle<String, DomainResolver, RandomState>,
 }
 
