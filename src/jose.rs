@@ -11,6 +11,7 @@ const CURVE: &str = "P-256";
 const KEY_TYPE: &str = "EC";
 const PUBLIC_KEY_USE: &str = "sig";
 
+/// [RFC 8555 Request Authentication](https://datatracker.ietf.org/doc/html/rfc8555#section-6.2)
 pub(crate) fn jose(
     keypair: &EcdsaKeyPair,
     payload: Option<Value>,

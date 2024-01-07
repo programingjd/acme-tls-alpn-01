@@ -5,11 +5,12 @@ use rustls::sign::CertifiedKey;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 #[allow(async_fn_in_trait)]
-pub trait HttpClient<R: Response> {
+pub trait HttpClient<R: Response>: Debug {
     async fn get_request(&self, url: impl AsRef<str>) -> Result<R>;
     async fn post_jose(&self, url: impl AsRef<str>, body: impl Borrow<Value>) -> Result<R>;
 }

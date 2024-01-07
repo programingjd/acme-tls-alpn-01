@@ -16,16 +16,20 @@ use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::hash_map::RandomState;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(feature = "tracing")]
+use tracing::debug;
 
+/// Order with its url that we can use to poll its status.
 #[derive(Debug)]
 pub(crate) struct LocatedOrder {
     url: String,
     pub(crate) order: Order,
 }
 
+/// [RFC 8555 Directory](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.1)
 #[derive(Deserialize, Debug)]
 pub(crate) struct Order {
     pub(crate) identifiers: Vec<Identifier>,
@@ -35,6 +39,7 @@ pub(crate) struct Order {
     pub(crate) status: OrderStatus,
 }
 
+/// [RFC 8555 Order States](https://datatracker.ietf.org/doc/html/rfc8555#page-32)
 #[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(tag = "status")]
 pub(crate) enum OrderStatus {
@@ -62,6 +67,7 @@ impl Display for OrderStatus {
     }
 }
 
+/// [RFC 8555 Identifier Types](https://datatracker.ietf.org/doc/html/rfc8555#section-9.7.7)
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "type", content = "value")]
 pub enum Identifier {
@@ -70,8 +76,17 @@ pub enum Identifier {
 }
 
 impl LocatedOrder {
+    /// [RFC 8555 Applying for Certificate Issuance](https://datatracker.ietf.org/doc/html/rfc8555#section-7.4)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "new_order",
+        skip(account,directory,client),
+        level = tracing::Level::DEBUG,
+        ret(level = tracing::Level::DEBUG),
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn new_order<C: HttpClient<R>, R: Response>(
-        domain_names: impl Iterator<Item = impl Into<String>>,
+        domain_names: impl Iterator<Item = impl Into<String>> + Debug,
         account: &AccountMaterial,
         directory: &Directory,
         client: &C,
@@ -106,15 +121,22 @@ impl LocatedOrder {
                 .map_err(|err| ErrorKind::NewOrder.wrap(err))?;
             Ok(LocatedOrder { url, order })
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::NewOrder.into())
         }
     }
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "process_order",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn process<C: HttpClient<R>, R: Response>(
         self,
         account: &AccountMaterial,
@@ -128,6 +150,8 @@ impl LocatedOrder {
                 kind: ErrorKind::OrderProcessing { csr },
                 ..
             }) => {
+                #[cfg(feature = "tracing")]
+                debug!("waiting 10s before checking order status again");
                 Delay::new(Duration::from_secs(10u64)).await;
                 let order = Self::try_get(self.url, account, directory, client).await?;
                 match order
@@ -139,6 +163,8 @@ impl LocatedOrder {
                         kind: ErrorKind::OrderProcessing { csr },
                         ..
                     }) => {
+                        #[cfg(feature = "tracing")]
+                        debug!("waiting 150s before checking order status again");
                         Delay::new(Duration::from_secs(150u64)).await;
                         Self::try_get(order.url, account, directory, client)
                             .await?
@@ -151,6 +177,13 @@ impl LocatedOrder {
             Err(err) => Err(err),
         }
     }
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "get_order",
+        skip_all,
+        level = tracing::Level::TRACE,
+        err(level = tracing::Level::WARN)
+    )]
     async fn try_get<C: HttpClient<R>, R: Response>(
         url: String,
         account: &AccountMaterial,
@@ -176,11 +209,11 @@ impl LocatedOrder {
                 .map_err(|err| ErrorKind::GetOrder.wrap(err))?;
             Ok(LocatedOrder { url, order })
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::GetOrder.into())
         }
@@ -275,6 +308,8 @@ impl LocatedOrder {
                         }
                     }
                 }
+                #[cfg(feature = "tracing")]
+                debug!("waiting 120s before checking challenge status again");
                 let mut delay = Delay::new(Duration::from_secs(120));
                 loop {
                     let next = pending_challenges.next();
@@ -297,6 +332,13 @@ impl LocatedOrder {
             }
         }
     }
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "finalize_order",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     async fn finalize<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
@@ -338,20 +380,29 @@ impl LocatedOrder {
             match order.status {
                 OrderStatus::Processing => Err(ErrorKind::OrderProcessing { csr }.into()),
                 OrderStatus::Valid { certificate } => {
+                    #[cfg(feature = "tracing")]
+                    debug!(download_url = certificate);
                     Self::download_certificate(certificate, &csr, account, directory, client).await
                 }
                 _ => Err(ErrorKind::FinalizeOrder.into()),
             }
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::FinalizeOrder.into())
         }
     }
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "download_certificate",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     async fn download_certificate<C: HttpClient<R>, R: Response>(
         url: impl AsRef<str>,
         csr: &Csr,
@@ -379,11 +430,11 @@ impl LocatedOrder {
                 .map_err(|err| ErrorKind::DownloadCertificate.wrap(err))?;
             Ok([csr.private_key_pem.clone(), pem_certificate_chain].join("\n"))
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::DownloadCertificate.into())
         }
@@ -395,6 +446,8 @@ mod test {
     use super::*;
     use crate::letsencrypt::LetsEncrypt;
     use crate::Acme;
+    use test_tracing::test;
+    use tracing::trace;
 
     #[test]
     fn test_order_deserialization() {
@@ -415,7 +468,6 @@ mod test {
             "certificate": "https://example.com/acme/cert/mAt3xBGaobw"
         }))
         .unwrap();
-        println!("{json}");
         let deserialized = serde_json::from_str::<Order>(json.as_str()).unwrap();
         assert_eq!(
             deserialized.status,
@@ -447,9 +499,9 @@ mod test {
         )
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_new_order() {
-        let acme = Acme::default();
+        let acme = Acme::empty();
         let directory = Directory::from(
             LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
@@ -470,7 +522,7 @@ mod test {
         )
         .await
         .unwrap();
-        println!("{}", order.url);
+        trace!(order_url = order.url);
         assert_eq!(order.order.status, OrderStatus::Pending);
         assert_eq!(order.order.identifiers.len(), 1);
         assert_eq!(

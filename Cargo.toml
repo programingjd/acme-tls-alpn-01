@@ -58,16 +58,17 @@ version = "0.22"
 default-features = false
 features = ["ring"]
 
-#[dependencies.postage]
-#version = "0.5"
-#default-features = false
-#features = ["futures-traits"]
-
 [dependencies.reqwest]
 optional = true
 version = "0.11"
 default-features = false
 features = ["json", "rustls-tls"]
+
+[dependencies.tracing]
+optional = true
+version = "0.1"
+default-features = false
+features = ["std", "async-await", "attributes"]
 
 [dev-dependencies.tokio]
 version = "1.35"
@@ -79,10 +80,29 @@ version = "0.25"
 default-features = false
 features = ["ring"]
 
+[dev-dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["std", "async-await", "attributes"]
+
+[dev-dependencies.tracing-subscriber]
+version = "0.3"
+default-features = true
+features = ["env-filter"]
+
+[dev-dependencies.test-tracing]
+path = "test-tracing"
+
 [features]
-default = ["reqwest"]
+default = ["tracing","reqwest"]
 reqwest = ["dep:reqwest"]
+tracing = ["dep:tracing"]
+
+[workspace]
+members = ["test-tracing"]
 
 [[example]]
 name = "renew"
 required-features = ["reqwest"]
+[dependencies]
+log = "0.4.20"

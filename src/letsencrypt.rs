@@ -1,5 +1,7 @@
 pub enum LetsEncrypt {
+    /// [Let's Encrypt production directory](https://letsencrypt.org/getting-started/)
     ProductionEnvironment,
+    /// [Let's Encrypt staging environment](https://letsencrypt.org/docs/staging-environment/)
     StagingEnvironment,
 }
 

@@ -1,7 +1,11 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{Error, ErrorKind, Result};
 use serde::Deserialize;
+use std::fmt::Debug;
+#[cfg(feature = "tracing")]
+use tracing::debug;
 
+/// [RFC 8555 Directory](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.1)
 #[derive(Debug, Deserialize)]
 pub struct Directory {
     #[serde(rename = "newAccount")]
@@ -17,8 +21,17 @@ pub struct Directory {
 }
 
 impl Directory {
+    /// [RFC 8555 Directory](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.1)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "get_directory",
+        skip(client),
+        level = tracing::Level::TRACE,
+        ret(level = tracing::Level::TRACE),
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn from<C: HttpClient<R>, R: Response>(
-        directory_url: impl AsRef<str>,
+        directory_url: impl AsRef<str> + Debug,
         client: &C,
     ) -> Result<Self> {
         let directory_url = directory_url.as_ref();
@@ -36,11 +49,11 @@ impl Directory {
                 .wrap(err)
             })
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::FetchDirectory {
                 url: directory_url.to_string(),
@@ -48,6 +61,15 @@ impl Directory {
             .into())
         }
     }
+    /// [RFC 8555 Nonce](https://datatracker.ietf.org/doc/html/rfc8555#section-7.2)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "new_nonce",
+        skip(client),
+        level = tracing::Level::TRACE,
+        ret(level = tracing::Level::TRACE),
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn new_nonce<C: HttpClient<R>, R: Response>(
         &self,
         client: &C,
@@ -64,11 +86,11 @@ impl Directory {
             let _ = response.body_as_bytes().await;
             Ok(nonce)
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::NewNonce.into())
         }
@@ -81,6 +103,7 @@ mod test {
     use crate::letsencrypt::LetsEncrypt;
     use crate::Acme;
     use serde_json::json;
+    use test_tracing::test;
 
     #[test]
     fn test_deserialization() {
@@ -99,7 +122,6 @@ mod test {
             }
         }))
         .unwrap();
-        println!("{json}");
         let deserialized = serde_json::from_str::<Directory>(json.as_str()).unwrap();
         assert_eq!(deserialized.new_nonce, "https://example.com/acme/new-nonce");
         assert_eq!(
@@ -113,11 +135,18 @@ mod test {
         );
     }
 
+    #[test(tokio::test)]
+    async fn invalid_url() {
+        let acme = Acme::empty();
+        assert!(acme
+            .directory("https://nonexisting.org/acme")
+            .await
+            .is_err());
+    }
+
     async fn letsencrypt(environment: &LetsEncrypt) {
-        let acme = Acme::default();
+        let acme = Acme::empty();
         let directory = acme.directory(environment.directory_url()).await.unwrap();
-        #[cfg(debug_assertions)]
-        println!("{directory:?}");
         assert_eq!(
             directory.new_account,
             format!("https://{}/acme/new-acct", environment.domain())
@@ -136,26 +165,24 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn letsencrypt_production() {
         letsencrypt(&LetsEncrypt::ProductionEnvironment).await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn letsencrypt_staging() {
         letsencrypt(&LetsEncrypt::StagingEnvironment).await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn new_nonce() {
-        let acme = Acme::default();
+        let acme = Acme::empty();
         let directory = acme
             .directory(LetsEncrypt::default().directory_url())
             .await
             .unwrap();
         let nonce = directory.new_nonce(&acme.client).await.unwrap();
-        #[cfg(debug_assertions)]
-        println!("{nonce:?}");
         assert!(nonce.len() > 0)
     }
 }

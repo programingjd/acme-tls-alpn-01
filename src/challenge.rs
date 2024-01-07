@@ -11,7 +11,10 @@ use rustls::sign::CertifiedKey;
 use serde::Deserialize;
 use serde_json::json;
 use std::str::from_utf8;
+#[cfg(feature = "tracing")]
+use tracing::debug;
 
+/// [RFC 8555 Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8)
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Challenge {
     pub(crate) url: String,
@@ -25,14 +28,18 @@ pub(crate) struct Challenge {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub(crate) enum ChallengeType {
+    /// [RFC 8555 HTTP Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8.3)
     #[serde(rename = "http-01")]
     Http01,
+    /// [RFC 8555 DNS Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8.4)
     #[serde(rename = "dns-01")]
     Dns01,
+    /// [RFC 8737 TLS ALPN Challenge](https://datatracker.ietf.org/doc/html/rfc8737)
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
 }
 
+/// [RFC 8555 Challenge States](https://datatracker.ietf.org/doc/html/rfc8555#page-31)
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "status")]
 pub(crate) enum ChallengeStatus {
@@ -47,6 +54,7 @@ pub(crate) enum ChallengeStatus {
 }
 
 impl Challenge {
+    /// [RFC 8555 Key Authorizations](https://datatracker.ietf.org/doc/html/rfc8555#section-8.1)
     pub(crate) fn authorization_key(&self, account: &AccountMaterial) -> String {
         let jwk = jwk(&account.keypair);
         let thumbprint = jwk.thumbprint();
@@ -60,6 +68,7 @@ impl Challenge {
         .unwrap()
         .to_string()
     }
+    /// [RFC 8737 Certificate](https://datatracker.ietf.org/doc/html/rfc8737#section-3-4)
     pub(crate) fn certificate(
         domain_name: impl Into<String>,
         authorization_key: String,
@@ -84,6 +93,14 @@ impl Challenge {
             .expect("failed to generate signing key"),
         ))
     }
+    /// [RFC 8555 Responding to Challenges](https://datatracker.ietf.org/doc/html/rfc8555#section-7.5.1)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "accept_challenge",
+        skip(account,directory,client),
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn accept<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
@@ -109,11 +126,11 @@ impl Challenge {
                 .await
                 .map_err(|err| ErrorKind::Challenge.wrap(err))
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::Challenge.into())
         }
@@ -124,6 +141,7 @@ impl Challenge {
 mod test {
     use super::*;
     use serde_json::json;
+    use test_tracing::test;
 
     #[test]
     fn test_order_deserialization() {
@@ -134,7 +152,6 @@ mod test {
             "token": "LoqXcYV8q5ONbJQxbmR7SCTNo3tiAXDfowyjxAjEuX0"
         }))
         .unwrap();
-        println!("{json}");
         let deserialized = serde_json::from_str::<Challenge>(json.as_str()).unwrap();
         assert_eq!(deserialized.status, ChallengeStatus::Pending);
         assert_eq!(deserialized.kind, ChallengeType::Http01);

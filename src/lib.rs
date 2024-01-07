@@ -5,10 +5,11 @@ use crate::errors::Result;
 use crate::order::LocatedOrder;
 use crate::resolver::{CertResolver, DomainResolver};
 use flashmap::WriteHandle;
-use rustls::sign::CertifiedKey;
 use std::collections::hash_map::RandomState;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::sync::Once;
 
 mod account;
 mod authorization;
@@ -30,6 +31,9 @@ pub extern crate reqwest;
 
 pub extern crate rcgen;
 
+#[cfg(test)]
+pub(crate) static INIT: Once = Once::new();
+
 #[cfg(feature = "reqwest")]
 pub struct Acme<R, C = reqwest::Client>
 where
@@ -41,14 +45,6 @@ where
     domains: Vec<String>,
     resolver: CertResolver,
     writer: WriteHandle<String, DomainResolver, RandomState>,
-}
-
-impl Acme<reqwest::Response, reqwest::Client> {
-    pub fn from_domain_keys(
-        domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
-    ) -> Self {
-        Self::from_client_and_domain_keys(reqwest::Client::default(), domain_names)
-    }
 }
 
 #[cfg(not(feature = "reqwest"))]
@@ -73,7 +69,7 @@ impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
 }
 
 impl<C: HttpClient<R>, R: Response> Acme<R, C> {
-    pub async fn directory(&self, directory_url: impl AsRef<str>) -> Result<Directory> {
+    pub async fn directory(&self, directory_url: impl AsRef<str> + Debug) -> Result<Directory> {
         Directory::from(directory_url, &self.client).await
     }
     pub async fn new_account(

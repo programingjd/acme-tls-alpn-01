@@ -5,7 +5,11 @@ use crate::directory::Directory;
 use crate::errors::{ErrorKind, Result};
 use crate::jose::jose;
 use serde::Deserialize;
+use std::fmt::Debug;
+#[cfg(feature = "tracing")]
+use tracing::debug;
 
+/// [RFC 8555 Authorization](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.4)
 #[derive(Deserialize, Debug)]
 pub(crate) struct Authorization {
     pub(crate) identifier: crate::order::Identifier,
@@ -32,8 +36,16 @@ pub(crate) enum AuthorizationStatus {
 }
 
 impl Authorization {
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "authorize",
+        skip(account,directory,client),
+        level = tracing::Level::DEBUG,
+        ret(level = tracing::Level::DEBUG),
+        err(level = tracing::Level::WARN)
+    )]
     pub(crate) async fn authorize<C: HttpClient<R>, R: Response>(
-        url: impl AsRef<str>,
+        url: impl AsRef<str> + Debug,
         account: &AccountMaterial,
         directory: &Directory,
         client: &C,
@@ -57,11 +69,11 @@ impl Authorization {
                 .await
                 .map_err(|err| ErrorKind::GetAuthorization.wrap(err))
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::GetAuthorization.into())
         }
@@ -76,6 +88,7 @@ mod test {
     use crate::order::{Identifier, LocatedOrder};
     use crate::Acme;
     use serde_json::json;
+    use test_tracing::test;
 
     #[test]
     fn test_order_deserialization() {
@@ -110,7 +123,6 @@ mod test {
             "wildcard": false
         }))
         .unwrap();
-        println!("{json}");
         let deserialized = serde_json::from_str::<Authorization>(json.as_str()).unwrap();
         assert_eq!(deserialized.status, AuthorizationStatus::Pending);
         assert_eq!(
@@ -147,9 +159,9 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_authorize() {
-        let acme = Acme::default();
+        let acme = Acme::from_domain_names(vec!["void.programingjd.me"].into_iter());
         let directory = Directory::from(
             LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
@@ -172,7 +184,6 @@ mod test {
         .unwrap();
         let authorizations = order.order.authorizations;
         assert_eq!(authorizations.len(), 1);
-        println!("{}", &authorizations[0]);
         let authorization = Authorization::authorize(
             authorizations[0].as_str(),
             &account,

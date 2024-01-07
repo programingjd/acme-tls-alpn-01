@@ -7,13 +7,19 @@ use ring::signature::EcdsaKeyPair;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt::{Display, Formatter};
+#[cfg(feature = "tracing")]
+use tracing::debug;
 
+/// Because we have only have an easy way to go from pkcs8 to keypair,
+/// but not the other way around, we store the keypair in both its
+/// EcdsaKeyPair deserialized version, and its PKCS8 serialized version.
 #[derive(Serialize)]
 pub struct AccountMaterial {
     #[serde(skip_serializing)]
     pub(crate) keypair: EcdsaKeyPair,
     #[serde(with = "base64")]
     pkcs8: Vec<u8>,
+    /// the account url is also referred to as `kid` in the RFC.
     pub(crate) url: String,
 }
 
@@ -24,6 +30,8 @@ struct PackedAccountMaterial {
     url: String,
 }
 
+/// [RFC 8555 Account](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.2)
+/// We only use the status field.
 #[derive(Deserialize, Debug)]
 pub(crate) struct Account {
     // contact: Vec<String>,
@@ -31,6 +39,7 @@ pub(crate) struct Account {
     status: AccountStatus,
 }
 
+/// [RFC 8555 Account State](https://datatracker.ietf.org/doc/html/rfc8555#page-33)
 #[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(tag = "status")]
 pub(crate) enum AccountStatus {
@@ -73,18 +82,39 @@ impl From<AccountMaterial> for PackedAccountMaterial {
 }
 
 impl AccountMaterial {
+    /// Serialize to json
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "serialize_account_to_json",
+        skip(self),
+        level = tracing::Level::TRACE
+    )]
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("failed to serialize account material")
     }
+    /// Deserialize from json and check with the acme server that the account status is valid.
+    /// If the account is invalid, it might be because the terms of service need to be agreed to,
+    /// in which case, update the account with the terms of service agreement.
+    /// If the account is not found, then create a new one.
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "get_account_from_json",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     pub async fn from_json<C: HttpClient<R>, R: Response>(
         json: impl AsRef<str>,
         contact_email: impl AsRef<str>,
         directory: &Directory,
         client: &C,
     ) -> Result<AccountMaterial> {
+        // Restore account material from json
         let account: AccountMaterial = serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
             .map_err(|_| ErrorKind::DeserializeAccount.into())
             .and_then(|it| it.try_into())?;
+        // Get the existing account if it exists
+        // [rfc8555#section-7.3.1](https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.1)
         let nonce = directory.new_nonce(client).await?;
         let payload = json!({
             "onlyReturnExisting": true
@@ -102,6 +132,7 @@ impl AccountMaterial {
             .map_err(|err| ErrorKind::GetAccount.wrap(err))?;
         match response.status_code() {
             200 => {
+                // Account found, check that its status is valid.
                 let status = response
                     .body_as_json::<Account>()
                     .await
@@ -118,11 +149,12 @@ impl AccountMaterial {
                 }
             }
             403 => {
-                #[cfg(debug_assertions)]
+                // Try to update with the terms of service agreement.
+                #[cfg(feature = "tracing")]
                 if let Ok(text) = response.body_as_text().await {
-                    eprintln!("{text}")
+                    debug!(body = ?text)
                 }
-                #[cfg(not(debug_assertions))]
+                #[cfg(not(feature = "tracing"))]
                 let _ = response.body_as_text();
                 account
                     .update_contact(contact_email, directory, client)
@@ -130,6 +162,7 @@ impl AccountMaterial {
                 Ok(account)
             }
             400 | 404 => {
+                // Account not found, create a new one.
                 Self::new_account(
                     account.pkcs8,
                     account.keypair,
@@ -140,11 +173,11 @@ impl AccountMaterial {
                 .await
             }
             _ => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "tracing")]
                 if let Ok(text) = response.body_as_text().await {
-                    eprintln!("{text}")
+                    debug!(body = ?text)
                 }
-                #[cfg(not(debug_assertions))]
+                #[cfg(not(feature = "tracing"))]
                 let _ = response.body_as_text();
                 Err(ErrorKind::GetAccount.into())
             }
@@ -168,6 +201,15 @@ impl AccountMaterial {
         let keypair = keypair_from_pkcs8(&pkcs8).expect("failed to extract keypair");
         Self::new_account(pkcs8, keypair, contact_email, directory, client).await
     }
+
+    /// [RFC8555 Account Update](https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.2)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "update_account_contact",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     pub async fn update_contact<C: HttpClient<R>, R: Response>(
         &self,
         contact_email: impl AsRef<str>,
@@ -201,15 +243,23 @@ impl AccountMaterial {
                 _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {}", status))),
             }
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text)
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::GetAccount.into())
         }
     }
+    /// [RFC8555 Account Key Rollover](https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "update_account_key",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     pub async fn update_key<C: HttpClient<R>, R: Response>(
         &self,
         directory: &Directory,
@@ -251,15 +301,23 @@ impl AccountMaterial {
                 }
             }
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::ChangeAccountKey.into())
         }
     }
+    /// [RFC 8555 Nonce](https://datatracker.ietf.org/doc/html/rfc8555#section-7.2)
+    #[cfg(feature = "tracing")]
+    #[tracing::instrument(
+        name = "new_account",
+        skip_all,
+        level = tracing::Level::DEBUG,
+        err(level = tracing::Level::WARN)
+    )]
     async fn new_account<C: HttpClient<R>, R: Response>(
         pkcs8: Vec<u8>,
         keypair: EcdsaKeyPair,
@@ -300,11 +358,11 @@ impl AccountMaterial {
                 _ => Err(ErrorKind::NewAccount.with_msg(format!("account is {}", account.status))),
             }
         } else {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "tracing")]
             if let Ok(text) = response.body_as_text().await {
-                eprintln!("{text}")
+                debug!(body = ?text);
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "tracing"))]
             let _ = response.body_as_text();
             Err(ErrorKind::NewAccount.into())
         }
@@ -334,6 +392,8 @@ mod test {
     use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
     use crate::letsencrypt::LetsEncrypt;
     use crate::Acme;
+    use test_tracing::test;
+    use tracing::trace;
 
     #[test]
     fn test_account_material_serialization() {
@@ -346,7 +406,6 @@ mod test {
             url: kid.into(),
         };
         let json = original.to_json();
-        println!("{json}");
         let deserialized: AccountMaterial =
             serde_json::from_str::<PackedAccountMaterial>(json.as_ref())
                 .map_err(|_| ErrorKind::DeserializeAccount.into())
@@ -369,14 +428,13 @@ mod test {
             "orders": "https://example.com/acme/orders/rzGoeA"
         }))
         .unwrap();
-        println!("{json}");
         let deserialized = serde_json::from_str::<Account>(json.as_str()).unwrap();
         assert_eq!(deserialized.status, AccountStatus::Valid);
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_get_account_and_update_key() {
-        let acme = Acme::default();
+        let acme = Acme::empty();
         let directory = Directory::from(
             LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
@@ -386,7 +444,7 @@ mod test {
         let created = AccountMaterial::from("void@programingjd.me", &directory, &acme.client)
             .await
             .unwrap();
-        println!("{}", &created.url);
+        trace!(account_url = &created.url);
         let account = AccountMaterial::from_pkcs8(
             created.pkcs8.clone(),
             "void@programingjd.me",
