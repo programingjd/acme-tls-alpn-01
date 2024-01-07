@@ -155,37 +155,28 @@ impl LocatedOrder {
         // order status again. If it is still processing, then we
         // wait for another 2:30s and retrieve the order status one
         // last time. If it is still processing then we give up.
-        match self.retry(account, directory, writer, client, None).await {
-            Ok(it) => Ok(it),
-            Err(Error {
-                kind: ErrorKind::OrderProcessing { csr },
-                ..
-            }) => {
-                #[cfg(feature = "tracing")]
-                debug!("waiting 10s before checking order status again");
-                Delay::new(Duration::from_secs(10u64)).await;
-                let order = Self::try_get(self.url, account, directory, client).await?;
-                match order
-                    .retry(account, directory, writer, client, Some(csr))
-                    .await
-                {
-                    Ok(it) => Ok(it),
-                    Err(Error {
-                        kind: ErrorKind::OrderProcessing { csr },
-                        ..
-                    }) => {
+        let mut delays = vec![10u64, 150u64];
+        let mut maybe_csr = None;
+        loop {
+            match self
+                .retry(account, directory, writer, client, maybe_csr.take())
+                .await
+            {
+                Ok(it) => return Ok(it),
+                Err(Error {
+                    kind: ErrorKind::OrderProcessing { csr },
+                    ..
+                }) => {
+                    if let Some(delay) = delays.pop() {
                         #[cfg(feature = "tracing")]
-                        debug!("waiting 150s before checking order status again");
-                        Delay::new(Duration::from_secs(150u64)).await;
-                        Self::try_get(order.url, account, directory, client)
-                            .await?
-                            .retry(account, directory, writer, client, Some(csr))
-                            .await
+                        debug!("waiting {delay}s before checking order status again");
+                        let _ = maybe_csr.insert(csr);
+                    } else {
+                        return Err(ErrorKind::NewOrder.into());
                     }
-                    Err(err) => Err(err),
                 }
+                Err(err) => return Err(err),
             }
-            Err(err) => Err(err),
         }
     }
     /// Poll for the order status.
@@ -359,38 +350,16 @@ impl LocatedOrder {
                 // If that's the case, we wait for 10s and check again.
                 // If the status is still pending, we wait for 2:30s and check
                 // one last time. If the status is still pending then we give up.
-                return match Self::try_get(self.url.clone(), account, directory, client)
-                    .await?
-                    .order
-                    .status
-                {
-                    // Unrecoverable error
-                    OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
-                        domains: self
-                            .order
-                            .identifiers
-                            .iter()
-                            .map(|it| match it {
-                                Identifier::Dns(name) => name.clone(),
-                            })
-                            .collect(),
-                    }
-                    .into()),
-
-                    // Ready to finalize and download the certificate
-                    OrderStatus::Ready => self.finalize(account, directory, client).await,
-                    // Still pending
-                    OrderStatus::Pending => {
-                        #[cfg(feature = "tracing")]
-                        debug!("waiting 10s before checking order status again");
-                        Delay::new(Duration::from_secs(10u64)).await;
-                        match Self::try_get(self.url.clone(), account, directory, client)
-                            .await?
-                            .order
-                            .status
-                        {
-                            // Unrecoverable error
-                            OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
+                let mut delays = vec![10u64, 150u64];
+                loop {
+                    match Self::try_get(self.url.clone(), account, directory, client)
+                        .await?
+                        .order
+                        .status
+                    {
+                        // Unrecoverable error
+                        OrderStatus::Invalid => {
+                            return Err(ErrorKind::InvalidOrder {
                                 domains: self
                                     .order
                                     .identifiers
@@ -400,43 +369,25 @@ impl LocatedOrder {
                                     })
                                     .collect(),
                             }
-                            .into()),
-                            // Ready to finalize and download the certificate
-                            OrderStatus::Ready => self.finalize(account, directory, client).await,
-                            // Still pending
-                            OrderStatus::Pending => {
-                                #[cfg(feature = "tracing")]
-                                debug!("waiting 150s before checking order status again");
-                                Delay::new(Duration::from_secs(150u64)).await;
-                                match Self::try_get(self.url.clone(), account, directory, client)
-                                    .await?
-                                    .order
-                                    .status
-                                {
-                                    // Unrecoverable error
-                                    OrderStatus::Invalid => Err(ErrorKind::InvalidOrder {
-                                        domains: self
-                                            .order
-                                            .identifiers
-                                            .iter()
-                                            .map(|it| match it {
-                                                Identifier::Dns(name) => name.clone(),
-                                            })
-                                            .collect(),
-                                    }
-                                    .into()),
-                                    // Ready to finalize and download the certificate
-                                    OrderStatus::Ready => {
-                                        self.finalize(account, directory, client).await
-                                    }
-                                    _ => Err(ErrorKind::NewOrder.into()),
-                                }
-                            }
-                            _ => Err(ErrorKind::NewOrder.into()),
+                            .into())
                         }
+                        // Ready to finalize and download the certificate
+                        OrderStatus::Ready => {
+                            return self.finalize(account, directory, client).await
+                        }
+                        // Still pending
+                        OrderStatus::Pending => {
+                            if let Some(delay) = delays.pop() {
+                                #[cfg(feature = "tracing")]
+                                debug!("waiting {delay}s before checking order status again");
+                                Delay::new(Duration::from_secs(delay)).await;
+                            } else {
+                                return Err(ErrorKind::NewOrder.into());
+                            }
+                        }
+                        _ => return Err(ErrorKind::NewOrder.into()),
                     }
-                    _ => Err(ErrorKind::NewOrder.into()),
-                };
+                }
             }
         }
     }
