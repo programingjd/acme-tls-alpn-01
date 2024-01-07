@@ -332,6 +332,7 @@ impl LocatedOrder {
             }
         }
     }
+    /// [RFC 8555 Finalizing the Order](https://datatracker.ietf.org/doc/html/rfc8555#section-page-46)
     #[cfg(feature = "tracing")]
     #[tracing::instrument(
         name = "finalize_order",
@@ -396,6 +397,7 @@ impl LocatedOrder {
             Err(ErrorKind::FinalizeOrder.into())
         }
     }
+    /// [RFC 8555 Downloading the Certificate](https://datatracker.ietf.org/doc/html/rfc8555#section-7.4.2)
     #[cfg(feature = "tracing")]
     #[tracing::instrument(
         name = "download_certificate",

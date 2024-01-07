@@ -71,11 +71,7 @@ impl ResolvesServerCert for CertResolver {
                 }
             } else {
                 let guard = self.reader.guard();
-                if let Some(resolver) = guard.get(server_name) {
-                    Some(resolver.key.clone())
-                } else {
-                    None
-                }
+                guard.get(server_name).map(|resolver| resolver.key.clone())
             }
         } else {
             None

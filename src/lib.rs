@@ -9,7 +9,6 @@ use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::Once;
 
 mod account;
 mod authorization;
@@ -32,7 +31,7 @@ pub extern crate reqwest;
 pub extern crate rcgen;
 
 #[cfg(test)]
-pub(crate) static INIT: Once = Once::new();
+pub(crate) static INIT: std::sync::Once = std::sync::Once::new();
 
 #[cfg(feature = "reqwest")]
 pub struct Acme<R, C = reqwest::Client>

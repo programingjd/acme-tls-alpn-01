@@ -34,6 +34,10 @@ pub(crate) enum ChallengeType {
     /// [RFC 8555 DNS Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8.4)
     #[serde(rename = "dns-01")]
     Dns01,
+    #[serde(rename = "tls-sni-01")]
+    TlsSNI01,
+    #[serde(rename = "tls-sni-02")]
+    TlsSNI02,
     /// [RFC 8737 TLS ALPN Challenge](https://datatracker.ietf.org/doc/html/rfc8737)
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,

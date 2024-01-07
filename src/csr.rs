@@ -2,6 +2,7 @@ use crate::ecdsa::generate_pkcs8_ecdsa_keypair;
 use crate::errors::{Error, ErrorKind, Result};
 use rcgen::{Certificate, CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
 
+/// [RFC 8555 CSR](https://datatracker.ietf.org/doc/html/rfc8555#page-46)
 #[derive(Debug)]
 pub struct Csr {
     pub(crate) private_key_pem: String,

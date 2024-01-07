@@ -1,6 +1,5 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{ErrorKind, Result};
-use crate::resolver::CertResolver;
 use crate::Acme;
 use futures_timer::Delay;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -10,7 +9,6 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::type_name;
 use std::borrow::Borrow;
-use std::marker::PhantomData;
 use std::time::Duration;
 
 impl Acme<reqwest::Response, Client> {
@@ -27,9 +25,9 @@ impl Acme<reqwest::Response, Client> {
 #[cfg(test)]
 impl Acme<reqwest::Response, Client> {
     pub(crate) fn empty() -> Self {
-        let (resolver, writer) = CertResolver::create();
+        let (resolver, writer) = crate::resolver::CertResolver::create();
         Self {
-            _r: PhantomData,
+            _r: std::marker::PhantomData,
             client: Client::default(),
             domains: vec![],
             resolver,
