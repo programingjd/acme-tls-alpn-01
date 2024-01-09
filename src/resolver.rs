@@ -7,6 +7,7 @@ use rustls::sign::CertifiedKey;
 use std::collections::hash_map::RandomState;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+use tracing::debug;
 
 pub struct CertResolver {
     reader: ReadHandle<String, DomainResolver, RandomState>,
@@ -49,12 +50,18 @@ impl CertResolver {
 
 impl ResolvesServerCert for CertResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        #[cfg(feature = "tracing")]
+        debug!("new TLS connection");
         if let Some(server_name) = client_hello.server_name() {
+            #[cfg(feature = "tracing")]
+            debug!(server_name = server_name);
             if client_hello
                 .alpn()
                 .and_then(|mut it| it.find(|&it| it == b"acme-tls/1"))
                 .is_some()
             {
+                #[cfg(feature = "tracing")]
+                debug!("alpn challenge");
                 let guard = self.reader.guard();
                 if let Some(resolver) = guard.get(server_name) {
                     match &resolver.challenge_key {

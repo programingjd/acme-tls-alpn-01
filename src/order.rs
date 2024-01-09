@@ -302,13 +302,13 @@ impl LocatedOrder {
                                     key: Arc::new(resolver.key.as_ref().clone()),
                                     challenge_key: Some(Arc::new(Challenge::certificate(
                                         domain_name,
-                                        challenge.authorization_key(account),
+                                        &challenge.authorization_key(account),
                                     )?)),
                                     notifier: Some(sender),
                                 };
                                 guard.insert(domain_name.clone(), resolver);
                                 match challenge.accept(account, directory, client).await?.status {
-                                    ChallengeStatus::Processing => {
+                                    ChallengeStatus::Processing | ChallengeStatus::Pending => {
                                         pending_challenges.push(receiver.into_recv_async())
                                     }
                                     ChallengeStatus::Valid => {}
@@ -316,10 +316,6 @@ impl LocatedOrder {
                                         return Err(
                                             ErrorKind::Challenge.with_msg("challenge is invalid")
                                         )
-                                    }
-                                    ChallengeStatus::Pending => {
-                                        return Err(ErrorKind::Challenge
-                                            .with_msg("challenge is still pending"))
                                     }
                                 }
                             }

@@ -9,6 +9,7 @@ use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::sync::Arc;
 
 mod account;
 mod authorization;
@@ -42,7 +43,7 @@ where
     _r: PhantomData<R>,
     client: C,
     domains: Vec<String>,
-    pub resolver: CertResolver,
+    pub resolver: Arc<CertResolver>,
     writer: WriteHandle<String, DomainResolver, RandomState>,
 }
 
@@ -63,7 +64,7 @@ impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
     type Target = CertResolver;
 
     fn deref(&self) -> &Self::Target {
-        &self.resolver
+        &&self.resolver
     }
 }
 

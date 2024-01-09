@@ -48,7 +48,7 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
             client,
             _r: PhantomData,
             domains,
-            resolver,
+            resolver: Arc::new(resolver),
             writer,
         }
     }

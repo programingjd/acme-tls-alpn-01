@@ -10,7 +10,6 @@ use rustls::pki_types::PrivateKeyDer;
 use rustls::sign::CertifiedKey;
 use serde::Deserialize;
 use serde_json::json;
-use std::str::from_utf8;
 #[cfg(feature = "tracing")]
 use tracing::debug;
 
@@ -59,29 +58,24 @@ pub(crate) enum ChallengeStatus {
 
 impl Challenge {
     /// [RFC 8555 Key Authorizations](https://datatracker.ietf.org/doc/html/rfc8555#section-8.1)
-    pub(crate) fn authorization_key(&self, account: &AccountMaterial) -> String {
+    pub(crate) fn authorization_key(&self, account: &AccountMaterial) -> Vec<u8> {
         let jwk = jwk(&account.keypair);
         let thumbprint = jwk.thumbprint();
-        from_utf8(
-            digest(
-                &SHA256,
-                format!("{}.{}", &self.token, &thumbprint).as_bytes(),
-            )
-            .as_ref(),
+        digest(
+            &SHA256,
+            format!("{}.{}", &self.token, &thumbprint).as_bytes(),
         )
-        .unwrap()
-        .to_string()
+        .as_ref()
+        .to_vec()
     }
     /// [RFC 8737 Certificate](https://datatracker.ietf.org/doc/html/rfc8737#section-3-4)
     pub(crate) fn certificate(
         domain_name: impl Into<String>,
-        authorization_key: String,
+        authorization_key: &[u8],
     ) -> Result<CertifiedKey> {
         let mut params = CertificateParams::new(vec![domain_name.into()]);
         params.alg = &PKCS_ECDSA_P256_SHA256;
-        params.custom_extensions = vec![CustomExtension::new_acme_identifier(
-            authorization_key.as_bytes(),
-        )];
+        params.custom_extensions = vec![CustomExtension::new_acme_identifier(authorization_key)];
         let cert = Certificate::from_params(params).map_err(|_| {
             let error: Error = ErrorKind::Challenge.into();
             error

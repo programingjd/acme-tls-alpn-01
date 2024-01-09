@@ -30,7 +30,7 @@ impl Acme<reqwest::Response, Client> {
             _r: std::marker::PhantomData,
             client: Client::default(),
             domains: vec![],
-            resolver,
+            resolver: std::sync::Arc::new(resolver),
             writer,
         }
     }
