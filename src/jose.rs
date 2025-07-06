@@ -1,6 +1,6 @@
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine;
-use ring::digest::{digest, SHA256};
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use ring::digest::{SHA256, digest};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use serde::Serialize;
@@ -36,7 +36,7 @@ pub(crate) fn jose(
         Some(payload) => BASE64_URL_SAFE_NO_PAD.encode(payload.to_string()),
         None => String::new(),
     };
-    let message = format!("{}.{}", protected, payload);
+    let message = format!("{protected}.{payload}");
     let signature = keypair
         .sign(&SystemRandom::new(), message.as_bytes())
         .expect("failed to sign message");

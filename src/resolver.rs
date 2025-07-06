@@ -90,12 +90,9 @@ pub(crate) fn create_self_signed_certificate(domain_name: &str) -> CertifiedKey 
     let cert = rcgen::generate_simple_self_signed(vec![domain_name.to_string()])
         .expect("failed to generate certificate");
     CertifiedKey::new(
-        vec![cert
-            .serialize_der()
-            .expect("failed to serialize certificate")
-            .into()],
+        vec![cert.cert.der().to_vec().into()],
         any_supported_type(&PrivateKeyDer::Pkcs8(
-            cert.serialize_private_key_der().into(),
+            cert.signing_key.serialize_der().into(),
         ))
         .expect("failed to generate signing key"),
     )

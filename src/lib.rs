@@ -64,7 +64,7 @@ impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
     type Target = CertResolver;
 
     fn deref(&self) -> &Self::Target {
-        &&self.resolver
+        &self.resolver
     }
 }
 

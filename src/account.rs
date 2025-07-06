@@ -145,7 +145,7 @@ impl AccountMaterial {
                             .await?;
                         Ok(account)
                     }
-                    _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {}", status))),
+                    _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {status}"))),
                 }
             }
             403 => {
@@ -240,7 +240,7 @@ impl AccountMaterial {
                 .status;
             match status {
                 AccountStatus::Valid => Ok(()),
-                _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {}", status))),
+                _ => Err(ErrorKind::GetAccount.with_msg(format!("account is {status}"))),
             }
         } else {
             #[cfg(feature = "tracing")]
@@ -290,7 +290,7 @@ impl AccountMaterial {
                 .await
                 .map_err(|err| ErrorKind::ChangeAccountKey.wrap(err))?;
             match account.status {
-                AccountStatus::Valid { .. } => Ok(AccountMaterial {
+                AccountStatus::Valid => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
                     url: self.url.clone(),
@@ -350,7 +350,7 @@ impl AccountMaterial {
                 .await
                 .map_err(|err| ErrorKind::NewAccount.wrap(err))?;
             match account.status {
-                AccountStatus::Valid { .. } => Ok(AccountMaterial {
+                AccountStatus::Valid => Ok(AccountMaterial {
                     keypair,
                     pkcs8,
                     url: kid,
@@ -389,9 +389,9 @@ mod base64 {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::Acme;
     use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
     use crate::letsencrypt::LetsEncrypt;
-    use crate::Acme;
     use test_tracing::test;
     use tracing::trace;
 

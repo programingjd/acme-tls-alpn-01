@@ -1,32 +1,40 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+version = "0.2.0"
+edition = "2024"
+authors = ["Jerome David <programingjd@gmail.com>"]
+categories = ["web-programming::http-server"]
+description = "Auto TLS certificate renewal with ACME TLS-ALPN-01"
+keywords = ["TLS", "TLS-ALPN-01", "acme", "letsencrypt"]
+license = "MIT"
+repository = "https://github.com/programingjd/acme-tls-alpn-01"
+include = [
+    "Cargo.toml", "src", "examples", "LICENSE", "README.md"
+]
 
 [dependencies.ring]
 version = "0.17"
 default-features = false
-features = ["std","alloc"]
+features = ["std", "alloc"]
 
 [dependencies.base64]
-version = "0.21"
+version = "0.22"
 default-features = false
-features = ["std","alloc"]
+features = ["std", "alloc"]
 
 [dependencies.serde]
 version = "1.0"
-features = ["std","alloc","derive"]
+features = ["std", "alloc", "derive"]
 
 [dependencies.serde_json]
 version = "1.0"
 default-features = false
-features = ["std","alloc"]
+features = ["std", "alloc"]
 
 [dependencies.futures]
 version = "0.3"
 default-features = false
-features = ["std","alloc"]
+features = ["std", "alloc"]
 
 [dependencies.futures-timer]
 version = "3.0"
@@ -44,9 +52,9 @@ default-features = false
 features = ["default"]
 
 [dependencies.rcgen]
-version = "0.12"
+version = "0.14"
 default-features = false
-features = ["ring","pem"]
+features = ["ring", "pem"]
 
 [dependencies.pem]
 version = "3.0"
@@ -54,13 +62,13 @@ default-features = false
 features = ["std"]
 
 [dependencies.rustls]
-version = "0.22"
+version = "0.23"
 default-features = false
 features = ["ring"]
 
 [dependencies.reqwest]
 optional = true
-version = "0.11"
+version = "0.12"
 default-features = false
 features = ["json", "rustls-tls"]
 
@@ -76,7 +84,7 @@ default-features = false
 features = ["net", "io-util", "rt-multi-thread", "macros"]
 
 [dev-dependencies.tokio-rustls]
-version = "0.25"
+version = "0.26"
 default-features = false
 features = ["ring"]
 
@@ -94,7 +102,7 @@ features = ["env-filter"]
 path = "test-tracing"
 
 [features]
-default = ["tracing","reqwest"]
+default = ["tracing", "reqwest"]
 reqwest = ["dep:reqwest"]
 tracing = ["dep:tracing"]
 
@@ -104,5 +112,3 @@ members = ["test-tracing"]
 [[example]]
 name = "renew"
 required-features = ["reqwest"]
-[dependencies]
-log = "0.4.20"

@@ -81,7 +81,7 @@ impl Display for Error {
 impl Display for ErrorDetail {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorDetail::Error(err) => write!(f, "{}", err),
+            ErrorDetail::Error(err) => write!(f, "{err}"),
             ErrorDetail::Message(msg) => f.write_str(msg),
         }
     }
@@ -100,9 +100,9 @@ impl Display for ErrorKind {
                 write!(f, "acme service not available")
             }
             ErrorKind::DeserializationError { type_name } => {
-                write!(f, "failed to deserialize to {}", type_name)
+                write!(f, "failed to deserialize to {type_name}")
             }
-            ErrorKind::FetchDirectory { ref url } => {
+            ErrorKind::FetchDirectory { url } => {
                 write!(f, "could not fetch ACME directory at {url}")
             }
             ErrorKind::InvalidKey => {
@@ -126,13 +126,13 @@ impl Display for ErrorKind {
             ErrorKind::ChangeAccountKey => {
                 write!(f, "could not change account key")
             }
-            ErrorKind::Csr { ref domains } => {
+            ErrorKind::Csr { domains } => {
                 write!(
                     f,
                     "could not generate CSR for domains: {}",
                     domains
                         .iter()
-                        .map(|it| format!("\"{}\"", it))
+                        .map(|it| format!("\"{it}\""))
                         .collect::<Vec<String>>()
                         .join(", ")
                 )
@@ -140,13 +140,13 @@ impl Display for ErrorKind {
             ErrorKind::NewOrder => {
                 write!(f, "could not get or create new order")
             }
-            ErrorKind::InvalidOrder { ref domains } => {
+            ErrorKind::InvalidOrder { domains } => {
                 write!(
                     f,
                     "invalid order for domains: {}",
                     domains
                         .iter()
-                        .map(|it| format!("\"{}\"", it))
+                        .map(|it| format!("\"{it}\""))
                         .collect::<Vec<String>>()
                         .join(", ")
                 )

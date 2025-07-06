@@ -1,6 +1,6 @@
 use crate::ecdsa::generate_pkcs8_ecdsa_keypair;
 use crate::errors::{Error, ErrorKind, Result};
-use rcgen::{Certificate, CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 
 /// [RFC 8555 CSR](https://datatracker.ietf.org/doc/html/rfc8555#page-46)
 #[derive(Debug)]
@@ -20,26 +20,22 @@ impl TryFrom<Vec<String>> for Csr {
     fn try_from(domain_names: Vec<String>) -> Result<Self> {
         let pkcs8 = generate_pkcs8_ecdsa_keypair();
         let keypair = KeyPair::try_from(pkcs8).expect("failed to extract keypair");
-        let mut params = CertificateParams::new(domain_names.clone());
-        params.alg = &PKCS_ECDSA_P256_SHA256;
-        params.key_pair = Some(keypair);
-        params.distinguished_name = DistinguishedName::new();
-        let certificate = Certificate::from_params(params).map_err(|_| {
-            let error: Error = ErrorKind::Csr {
-                domains: domain_names.clone(),
-            }
-            .into();
-            error
-        })?;
-        Ok(Csr {
-            private_key_pem: certificate.serialize_private_key_pem(),
-            der: certificate.serialize_request_der().map_err(|_| {
+
+        let request = CertificateParams::new(domain_names.clone())
+            .and_then(|mut params| {
+                params.distinguished_name = DistinguishedName::new();
+                params.serialize_request(&keypair)
+            })
+            .map_err(|_| {
                 let error: Error = ErrorKind::Csr {
-                    domains: domain_names,
+                    domains: domain_names.clone(),
                 }
                 .into();
                 error
-            })?,
+            })?;
+        Ok(Csr {
+            private_key_pem: keypair.serialize_pem(),
+            der: request.der().to_vec(),
         })
     }
 }

@@ -1,15 +1,15 @@
-use acme_tls_alpn_01::letsencrypt::LetsEncrypt;
 use acme_tls_alpn_01::Acme;
+use acme_tls_alpn_01::letsencrypt::LetsEncrypt;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use tokio::io::{copy, sink, split, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt, copy, sink, split};
 use tokio::join;
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::LazyConfigAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::server::Acceptor;
 use tokio_rustls::rustls::version::TLS13;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::server::TlsStream;
-use tokio_rustls::LazyConfigAcceptor;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -55,11 +55,11 @@ async fn main() -> std::io::Result<()> {
                             }
                         }
                         Err(err) => {
-                            eprintln!("Failed to start TLS handshake\n{:?}", err);
+                            eprintln!("Failed to start TLS handshake\n{err:?}");
                         }
                     }
                 }
-                Err(err) => eprintln!("Failed to accept TCP connection\n{:?}", err),
+                Err(err) => eprintln!("Failed to accept TCP connection\n{err:?}"),
             }
         }
     });

@@ -3,8 +3,8 @@ use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::{jose, jwk};
-use rcgen::{Certificate, CertificateParams, CustomExtension, PKCS_ECDSA_P256_SHA256};
-use ring::digest::{digest, SHA256};
+use rcgen::{CertificateParams, CustomExtension, KeyPair, PKCS_ECDSA_P256_SHA256};
+use ring::digest::{SHA256, digest};
 use rustls::crypto::ring::sign::any_supported_type;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::sign::CertifiedKey;
@@ -73,22 +73,21 @@ impl Challenge {
         domain_name: impl Into<String>,
         authorization_key: &[u8],
     ) -> Result<CertifiedKey> {
-        let mut params = CertificateParams::new(vec![domain_name.into()]);
-        params.alg = &PKCS_ECDSA_P256_SHA256;
-        params.custom_extensions = vec![CustomExtension::new_acme_identifier(authorization_key)];
-        let cert = Certificate::from_params(params).map_err(|_| {
-            let error: Error = ErrorKind::Challenge.into();
-            error
-        })?;
+        let (cert, signing_key) = CertificateParams::new(vec![domain_name.into()])
+            .and_then(|mut params| {
+                params.custom_extensions =
+                    vec![CustomExtension::new_acme_identifier(authorization_key)];
+                let signing_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
+                Ok((params.self_signed(&signing_key)?, signing_key))
+            })
+            .map_err(|_| {
+                let error: Error = ErrorKind::Challenge.into();
+                error
+            })?;
         Ok(CertifiedKey::new(
-            vec![cert
-                .serialize_der()
-                .expect("failed to serialize certificate")
-                .into()],
-            any_supported_type(&PrivateKeyDer::Pkcs8(
-                cert.serialize_private_key_der().into(),
-            ))
-            .expect("failed to generate signing key"),
+            vec![cert.der().to_vec().into()],
+            any_supported_type(&PrivateKeyDer::Pkcs8(signing_key.serialize_der().into()))
+                .expect("failed to generate signing key"),
         ))
     }
     /// [RFC 8555 Responding to Challenges](https://datatracker.ietf.org/doc/html/rfc8555#section-7.5.1)
