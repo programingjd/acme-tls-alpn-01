@@ -1,6 +1,6 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 authors = ["Jerome David <programingjd@gmail.com>"]
 categories = ["web-programming::http-server"]
@@ -56,10 +56,10 @@ version = "0.14"
 default-features = false
 features = ["ring", "pem"]
 
-[dependencies.pem]
-version = "3.0"
-default-features = false
-features = ["std"]
+#[dependencies.pem]
+#version = "3.0"
+#default-features = false
+#features = ["std"]
 
 [dependencies.rustls]
 version = "0.23"
@@ -79,7 +79,7 @@ default-features = false
 features = ["std", "async-await", "attributes"]
 
 [dev-dependencies.tokio]
-version = "1.35"
+version = "1.47"
 default-features = false
 features = ["net", "io-util", "rt-multi-thread", "macros"]
 
