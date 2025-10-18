@@ -25,17 +25,17 @@ pub trait Response {
     async fn body_as_bytes(self) -> Result<impl Borrow<[u8]>>;
 }
 
-impl<C: HttpClient<R>, R: Response> Acme<R, C> {
+impl<C: HttpClient<R> + Default, R: Response> Acme<R, C> {
     pub fn from_client_and_domain_keys(
         client: C,
         domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
     ) -> Self {
-        let (resolver, mut writer) = CertResolver::create();
+        let resolver = CertResolver::default();
         let mut domains = Vec::new();
         domain_names.for_each(|(domain, it)| {
             let domain = domain.into();
             domains.push(domain.clone());
-            writer.guard().insert(
+            resolver.map.pin().insert(
                 domain.clone(),
                 DomainResolver {
                     key: Arc::new(it.unwrap_or_else(|| create_self_signed_certificate(&domain))),
@@ -49,7 +49,6 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
             _r: PhantomData,
             domains,
             resolver: Arc::new(resolver),
-            writer,
         }
     }
 }

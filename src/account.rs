@@ -83,12 +83,11 @@ impl From<AccountMaterial> for PackedAccountMaterial {
 
 impl AccountMaterial {
     /// Serialize to json
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "serialize_account_to_json",
         skip(self),
         level = tracing::Level::TRACE
-    )]
+    ))]
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("failed to serialize account material")
     }
@@ -96,13 +95,12 @@ impl AccountMaterial {
     /// If the account is invalid, it might be because the terms of service need to be agreed to,
     /// in which case, update the account with the terms of service agreement.
     /// If the account is not found, then create a new one.
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "get_account_from_json",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub async fn from_json<C: HttpClient<R>, R: Response>(
         json: impl AsRef<str>,
         contact_email: impl AsRef<str>,
@@ -203,13 +201,12 @@ impl AccountMaterial {
     }
 
     /// [RFC8555 Account Update](https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.2)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "update_account_contact",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub async fn update_contact<C: HttpClient<R>, R: Response>(
         &self,
         contact_email: impl AsRef<str>,
@@ -253,13 +250,12 @@ impl AccountMaterial {
         }
     }
     /// [RFC8555 Account Key Rollover](https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "update_account_key",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub async fn update_key<C: HttpClient<R>, R: Response>(
         &self,
         directory: &Directory,
@@ -311,13 +307,12 @@ impl AccountMaterial {
         }
     }
     /// [RFC 8555 Nonce](https://datatracker.ietf.org/doc/html/rfc8555#section-7.2)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "new_account",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     async fn new_account<C: HttpClient<R>, R: Response>(
         pkcs8: Vec<u8>,
         keypair: EcdsaKeyPair,
@@ -389,11 +384,8 @@ mod base64 {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::Acme;
     use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
-    use crate::letsencrypt::LetsEncrypt;
     use test_tracing::test;
-    use tracing::trace;
 
     #[test]
     fn test_account_material_serialization() {
@@ -432,11 +424,12 @@ mod test {
         assert_eq!(deserialized.status, AccountStatus::Valid);
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_get_account_and_update_key() {
-        let acme = Acme::empty();
+        let acme = crate::Acme::empty();
         let directory = Directory::from(
-            LetsEncrypt::StagingEnvironment.directory_url(),
+            crate::letsencrypt::LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
         )
         .await
@@ -444,7 +437,7 @@ mod test {
         let created = AccountMaterial::from("void@programingjd.me", &directory, &acme.client)
             .await
             .unwrap();
-        trace!(account_url = &created.url);
+        tracing::trace!(account_url = &created.url);
         let account = AccountMaterial::from_pkcs8(
             created.pkcs8.clone(),
             "void@programingjd.me",

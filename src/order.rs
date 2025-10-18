@@ -6,16 +6,14 @@ use crate::csr::Csr;
 use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
-use crate::resolver::DomainResolver;
+use crate::resolver::{CertResolver, DomainResolver};
 use base64::Engine;
-use flashmap::WriteHandle;
 use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::hash_map::RandomState;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
@@ -77,14 +75,13 @@ pub enum Identifier {
 
 impl LocatedOrder {
     /// [RFC 8555 Applying for Certificate Issuance](https://datatracker.ietf.org/doc/html/rfc8555#section-7.4)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "new_order",
         skip(account,directory,client),
         level = tracing::Level::DEBUG,
         ret(level = tracing::Level::DEBUG),
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub(crate) async fn new_order<C: HttpClient<R>, R: Response>(
         domain_names: impl Iterator<Item = impl Into<String>> + Debug,
         account: &AccountMaterial,
@@ -135,18 +132,17 @@ impl LocatedOrder {
     /// notify the ACME server to validate them,
     /// wait for the ACME server validation to be done,
     /// finalize the order and download the certificate.
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "process_order",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub(crate) async fn process<C: HttpClient<R>, R: Response>(
         self,
         account: &AccountMaterial,
         directory: &Directory,
-        writer: &mut WriteHandle<String, DomainResolver, RandomState>,
+        resolver: &CertResolver,
         client: &C,
     ) -> Result<String> {
         // Once all the order has been finalized, the order might stay
@@ -159,14 +155,16 @@ impl LocatedOrder {
         let mut maybe_csr = None;
         loop {
             match self
-                .retry(account, directory, writer, client, maybe_csr.take())
+                .retry(account, directory, resolver, client, maybe_csr.take())
                 .await
             {
                 Ok(it) => return Ok(it),
                 Err(Error {
                     kind: ErrorKind::OrderProcessing { csr },
                     ..
-                }) => {
+                }) =>
+                {
+                    #[allow(unused)]
                     if let Some(delay) = delays.pop() {
                         #[cfg(feature = "tracing")]
                         debug!("waiting {delay}s before checking order status again");
@@ -180,13 +178,12 @@ impl LocatedOrder {
         }
     }
     /// Poll for the order status.
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "get_order",
         skip_all,
         level = tracing::Level::TRACE,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     async fn try_get<C: HttpClient<R>, R: Response>(
         url: String,
         account: &AccountMaterial,
@@ -233,7 +230,7 @@ impl LocatedOrder {
         &self,
         account: &AccountMaterial,
         directory: &Directory,
-        writer: &mut WriteHandle<String, DomainResolver, RandomState>,
+        resolver: &CertResolver,
         client: &C,
         csr: Option<Csr>,
     ) -> Result<String> {
@@ -290,7 +287,7 @@ impl LocatedOrder {
                 // Gather all the pending authorizations, and for each of them, select the tls-alpn-01 challenge
                 // and setup the resolver to respond to the validation request.
                 let mut pending_challenges = FuturesUnordered::<_>::new();
-                let mut guard = writer.guard();
+                let guard = resolver.map.pin();
                 for authorization in authorizations {
                     let Identifier::Dns(ref domain_name) = authorization.identifier;
                     if matches!(authorization.status, AuthorizationStatus::Pending) {
@@ -315,7 +312,7 @@ impl LocatedOrder {
                                     ChallengeStatus::Invalid => {
                                         return Err(
                                             ErrorKind::Challenge.with_msg("challenge is invalid")
-                                        )
+                                        );
                                     }
                                 }
                             }
@@ -365,11 +362,11 @@ impl LocatedOrder {
                                     })
                                     .collect(),
                             }
-                            .into())
+                            .into());
                         }
                         // Ready to finalize and download the certificate
                         OrderStatus::Ready => {
-                            return self.finalize(account, directory, client).await
+                            return self.finalize(account, directory, client).await;
                         }
                         // Still pending
                         OrderStatus::Pending => {
@@ -389,13 +386,12 @@ impl LocatedOrder {
     }
     /// [RFC 8555 Finalizing the Order](https://datatracker.ietf.org/doc/html/rfc8555#section-page-46)
     /// and if successful download the certificate.
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "finalize_order",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     async fn finalize<C: HttpClient<R>, R: Response>(
         &self,
         account: &AccountMaterial,
@@ -454,13 +450,12 @@ impl LocatedOrder {
         }
     }
     /// [RFC 8555 Downloading the Certificate](https://datatracker.ietf.org/doc/html/rfc8555#section-7.4.2)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "download_certificate",
         skip_all,
         level = tracing::Level::DEBUG,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     async fn download_certificate<C: HttpClient<R>, R: Response>(
         url: impl AsRef<str>,
         csr: &Csr,
@@ -502,10 +497,7 @@ impl LocatedOrder {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::letsencrypt::LetsEncrypt;
-    use crate::Acme;
     use test_tracing::test;
-    use tracing::trace;
 
     #[test]
     fn test_order_deserialization() {
@@ -557,11 +549,12 @@ mod test {
         )
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_new_order() {
-        let acme = Acme::empty();
+        let acme = crate::Acme::empty();
         let directory = Directory::from(
-            LetsEncrypt::StagingEnvironment.directory_url(),
+            crate::letsencrypt::LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
         )
         .await
@@ -580,7 +573,8 @@ mod test {
         )
         .await
         .unwrap();
-        trace!(order_url = order.url);
+        #[cfg(feature = "tracing")]
+        tracing::trace!(order_url = order.url);
         assert_eq!(order.order.status, OrderStatus::Pending);
         assert_eq!(order.order.identifiers.len(), 1);
         assert_eq!(

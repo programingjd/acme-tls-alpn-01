@@ -1,13 +1,15 @@
+pub extern crate rcgen;
+#[cfg(feature = "reqwest")]
+pub extern crate reqwest;
+
 use crate::account::AccountMaterial;
 use crate::client::{HttpClient, Response};
 use crate::directory::Directory;
 use crate::errors::Result;
 use crate::order::LocatedOrder;
-use crate::resolver::{CertResolver, DomainResolver};
-use flashmap::WriteHandle;
-use std::collections::hash_map::RandomState;
+use crate::resolver::CertResolver;
+use rustls::sign::CertifiedKey;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -26,41 +28,60 @@ pub mod resolver;
 
 #[cfg(feature = "reqwest")]
 mod reqwest_client;
-#[cfg(feature = "reqwest")]
-pub extern crate reqwest;
-
-pub extern crate rcgen;
 
 #[cfg(test)]
 pub(crate) static INIT: std::sync::Once = std::sync::Once::new();
 
 #[cfg(feature = "reqwest")]
-pub struct Acme<R, C = reqwest::Client>
+#[derive(Default)]
+pub struct Acme<R = reqwest::Response, C = reqwest::Client>
 where
     R: Response,
-    C: HttpClient<R>,
+    C: HttpClient<R> + Default,
 {
-    _r: PhantomData<R>,
+    _r: std::marker::PhantomData<R>,
     client: C,
     domains: Vec<String>,
     pub resolver: Arc<CertResolver>,
-    writer: WriteHandle<String, DomainResolver, RandomState>,
+}
+
+#[cfg(all(test, feature = "reqwest"))]
+impl Acme<reqwest::Response, reqwest::Client> {
+    pub(crate) fn empty() -> Self {
+        Self {
+            _r: std::marker::PhantomData,
+            client: reqwest::Client::default(),
+            domains: Vec::default(),
+            resolver: Arc::new(CertResolver::default()),
+        }
+    }
 }
 
 #[cfg(not(feature = "reqwest"))]
-pub struct Acme<R, E, C>
+#[derive(Default)]
+pub struct Acme<R, C>
 where
-    E: Error,
-    R: Response<E>,
-    C: HttpClient<R, E>,
+    R: Response,
+    C: HttpClient<R> + Default,
 {
+    _r: std::marker::PhantomData<R>,
     client: C,
-    domains: Vec<&'static str>,
-    resolver: CertResolver,
-    writer: WriteHandle<&'static str, DomainResolver, RandomState>,
+    domains: Vec<String>,
+    pub resolver: Arc<CertResolver>,
 }
 
-impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
+impl<C: HttpClient<R> + Default, R: Response> Acme<R, C> {
+    pub fn from_domain_keys(
+        domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
+    ) -> Self {
+        Self::from_client_and_domain_keys(C::default(), domain_names)
+    }
+    pub fn from_domain_names(domain_names: impl Iterator<Item = impl Into<String>>) -> Self {
+        Self::from_domain_keys(domain_names.into_iter().map(|it| (it, None)))
+    }
+}
+
+impl<C: HttpClient<R> + Default, R: Response> Deref for Acme<R, C> {
     type Target = CertResolver;
 
     fn deref(&self) -> &Self::Target {
@@ -68,7 +89,7 @@ impl<C: HttpClient<R>, R: Response> Deref for Acme<R, C> {
     }
 }
 
-impl<C: HttpClient<R>, R: Response> Acme<R, C> {
+impl<C: HttpClient<R> + Default, R: Response> Acme<R, C> {
     /// Retrieve the ACME directory at the specified url.
     pub async fn directory(&self, directory_url: impl AsRef<str> + Debug) -> Result<Directory> {
         Directory::from(directory_url, &self.client).await
@@ -89,7 +110,7 @@ impl<C: HttpClient<R>, R: Response> Acme<R, C> {
     ) -> Result<String> {
         LocatedOrder::new_order(self.domains.iter(), account, directory, &self.client)
             .await?
-            .process(account, directory, &mut self.writer, &self.client)
+            .process(account, directory, &self.resolver, &self.client)
             .await
     }
 }

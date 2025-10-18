@@ -1,40 +1,13 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{ErrorKind, Result};
-use crate::Acme;
 use futures_timer::Delay;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
-use rustls::sign::CertifiedKey;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::type_name;
 use std::borrow::Borrow;
 use std::time::Duration;
-
-impl Acme<reqwest::Response, Client> {
-    pub fn from_domain_keys(
-        domain_names: impl Iterator<Item = (impl Into<String>, Option<CertifiedKey>)>,
-    ) -> Self {
-        Self::from_client_and_domain_keys(Client::default(), domain_names)
-    }
-    pub fn from_domain_names(domain_names: impl Iterator<Item = impl Into<String>>) -> Self {
-        Self::from_domain_keys(domain_names.into_iter().map(|it| (it, None)))
-    }
-}
-
-#[cfg(test)]
-impl Acme<reqwest::Response, Client> {
-    pub(crate) fn empty() -> Self {
-        let (resolver, writer) = crate::resolver::CertResolver::create();
-        Self {
-            _r: std::marker::PhantomData,
-            client: Client::default(),
-            domains: vec![],
-            resolver: std::sync::Arc::new(resolver),
-            writer,
-        }
-    }
-}
 
 impl HttpClient<reqwest::Response> for Client {
     async fn get_request(&self, url: impl AsRef<str>) -> Result<reqwest::Response> {
@@ -154,7 +127,8 @@ impl Response for reqwest::Response {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::client::HttpClient;
+    use reqwest::Client;
 
     #[tokio::test]
     async fn test_text() {

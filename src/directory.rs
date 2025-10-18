@@ -22,14 +22,13 @@ pub struct Directory {
 
 impl Directory {
     /// [RFC 8555 Directory](https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.1)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "get_directory",
         skip(client),
         level = tracing::Level::TRACE,
         ret(level = tracing::Level::TRACE),
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub(crate) async fn from<C: HttpClient<R>, R: Response>(
         directory_url: impl AsRef<str> + Debug,
         client: &C,
@@ -62,14 +61,13 @@ impl Directory {
         }
     }
     /// [RFC 8555 Nonce](https://datatracker.ietf.org/doc/html/rfc8555#section-7.2)
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "new_nonce",
         skip(client),
         level = tracing::Level::TRACE,
         ret(level = tracing::Level::TRACE),
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub(crate) async fn new_nonce<C: HttpClient<R>, R: Response>(
         &self,
         client: &C,
@@ -100,8 +98,6 @@ impl Directory {
 #[cfg(test)]
 mod test {
     use crate::directory::Directory;
-    use crate::letsencrypt::LetsEncrypt;
-    use crate::Acme;
     use serde_json::json;
     use test_tracing::test;
 
@@ -135,17 +131,20 @@ mod test {
         );
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn invalid_url() {
-        let acme = Acme::empty();
-        assert!(acme
-            .directory("https://nonexisting.org/acme")
-            .await
-            .is_err());
+        let acme = crate::Acme::empty();
+        assert!(
+            acme.directory("https://nonexisting.org/acme")
+                .await
+                .is_err()
+        );
     }
 
-    async fn letsencrypt(environment: &LetsEncrypt) {
-        let acme = Acme::empty();
+    #[cfg(feature = "reqwest")]
+    async fn letsencrypt(environment: &crate::letsencrypt::LetsEncrypt) {
+        let acme = crate::Acme::empty();
         let directory = acme.directory(environment.directory_url()).await.unwrap();
         assert_eq!(
             directory.new_account,
@@ -165,21 +164,24 @@ mod test {
         );
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn letsencrypt_production() {
-        letsencrypt(&LetsEncrypt::ProductionEnvironment).await
+        letsencrypt(&crate::letsencrypt::LetsEncrypt::ProductionEnvironment).await
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn letsencrypt_staging() {
-        letsencrypt(&LetsEncrypt::StagingEnvironment).await
+        letsencrypt(&crate::letsencrypt::LetsEncrypt::StagingEnvironment).await
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn new_nonce() {
-        let acme = Acme::empty();
+        let acme = crate::Acme::empty();
         let directory = acme
-            .directory(LetsEncrypt::default().directory_url())
+            .directory(crate::letsencrypt::LetsEncrypt::default().directory_url())
             .await
             .unwrap();
         let nonce = directory.new_nonce(&acme.client).await.unwrap();

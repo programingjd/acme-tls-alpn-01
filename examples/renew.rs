@@ -1,15 +1,15 @@
-use acme_tls_alpn_01::Acme;
 use acme_tls_alpn_01::letsencrypt::LetsEncrypt;
+use acme_tls_alpn_01::Acme;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use tokio::io::{AsyncWriteExt, copy, sink, split};
+use tokio::io::{copy, sink, split, AsyncWriteExt};
 use tokio::join;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::LazyConfigAcceptor;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::server::Acceptor;
 use tokio_rustls::rustls::version::TLS13;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::server::TlsStream;
+use tokio_rustls::LazyConfigAcceptor;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -25,7 +25,9 @@ async fn main() -> std::io::Result<()> {
         // .expect("DOMAIN_NAME not set")
         .to_string();
     let https_listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, 443)).await?;
-    let mut acme = Acme::from_domain_names(vec![domain_name].into_iter());
+    let mut acme = Acme::<reqwest::Response, reqwest::Client>::from_domain_names(
+        vec![domain_name].into_iter(),
+    );
     let resolver = acme.resolver.clone();
     let mut tls_config = ServerConfig::builder_with_protocol_versions(&[&TLS13])
         .with_no_client_auth()

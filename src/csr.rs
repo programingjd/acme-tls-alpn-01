@@ -11,12 +11,11 @@ pub struct Csr {
 
 impl TryFrom<Vec<String>> for Csr {
     type Error = Error;
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "create_csr",
         level = tracing::Level::TRACE,
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     fn try_from(domain_names: Vec<String>) -> Result<Self> {
         let pkcs8 = generate_pkcs8_ecdsa_keypair();
         let keypair = KeyPair::try_from(pkcs8).expect("failed to extract keypair");

@@ -1,6 +1,6 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 authors = ["Jerome David <programingjd@gmail.com>"]
 categories = ["web-programming::http-server"]
@@ -46,10 +46,10 @@ version = "0.11"
 default-features = false
 features = ["async"]
 
-[dependencies.flashmap]
-version = "0.1"
+[dependencies.papaya]
+version = "0.2"
 default-features = false
-features = ["default"]
+features = []
 
 [dependencies.rcgen]
 version = "0.14"
@@ -79,7 +79,7 @@ default-features = false
 features = ["std", "async-await", "attributes"]
 
 [dev-dependencies.tokio]
-version = "1.47"
+version = "1.48"
 default-features = false
 features = ["net", "io-util", "rt-multi-thread", "macros"]
 
@@ -103,6 +103,7 @@ path = "test-tracing"
 
 [features]
 default = ["tracing", "reqwest"]
+#default = ["tracing"]
 reqwest = ["dep:reqwest"]
 tracing = ["dep:tracing"]
 

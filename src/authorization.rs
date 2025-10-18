@@ -36,14 +36,13 @@ pub(crate) enum AuthorizationStatus {
 }
 
 impl Authorization {
-    #[cfg(feature = "tracing")]
-    #[tracing::instrument(
+    #[cfg_attr(feature = "tracing", tracing::instrument(
         name = "authorize",
         skip(account,directory,client),
         level = tracing::Level::DEBUG,
         ret(level = tracing::Level::DEBUG),
         err(level = tracing::Level::WARN)
-    )]
+    ))]
     pub(crate) async fn authorize<C: HttpClient<R>, R: Response>(
         url: impl AsRef<str> + Debug,
         account: &AccountMaterial,
@@ -84,9 +83,7 @@ impl Authorization {
 mod test {
     use super::*;
     use crate::challenge::{ChallengeStatus, ChallengeType};
-    use crate::letsencrypt::LetsEncrypt;
-    use crate::order::{Identifier, LocatedOrder};
-    use crate::Acme;
+    use crate::order::Identifier;
     use serde_json::json;
     use test_tracing::test;
 
@@ -159,11 +156,14 @@ mod test {
         );
     }
 
+    #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_authorize() {
-        let acme = Acme::from_domain_names(vec!["void.programingjd.me"].into_iter());
+        let acme = crate::Acme::<reqwest::Response, reqwest::Client>::from_domain_names(
+            vec!["void.programingjd.me"].into_iter(),
+        );
         let directory = Directory::from(
-            LetsEncrypt::StagingEnvironment.directory_url(),
+            crate::letsencrypt::LetsEncrypt::StagingEnvironment.directory_url(),
             &acme.client,
         )
         .await
@@ -172,7 +172,7 @@ mod test {
             .new_account("void@programingjd.me", &directory)
             .await
             .unwrap();
-        let order = LocatedOrder::new_order(
+        let order = crate::order::LocatedOrder::new_order(
             Some("void.programingjd.me")
                 .iter()
                 .map(|&it| it.to_string()),

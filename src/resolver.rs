@@ -1,16 +1,17 @@
-use flashmap::{ReadHandle, WriteHandle};
 use flume::Sender;
+use papaya::HashMap;
 use rustls::crypto::ring::sign::any_supported_type;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use std::collections::hash_map::RandomState;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::sync::Arc;
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
+#[derive(Debug, Default)]
 pub struct CertResolver {
-    reader: ReadHandle<String, DomainResolver, RandomState>,
+    pub(crate) map: HashMap<String, DomainResolver>,
 }
 
 #[derive(Debug)]
@@ -20,14 +21,6 @@ pub(crate) struct DomainResolver {
     pub(crate) notifier: Option<Sender<String>>,
 }
 
-impl Debug for CertResolver {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let view = self.reader.guard();
-        let vec = view.iter().collect::<Vec<_>>();
-        write!(f, "{vec:?}")
-    }
-}
-
 impl From<CertifiedKey> for DomainResolver {
     fn from(value: CertifiedKey) -> Self {
         Self {
@@ -35,16 +28,6 @@ impl From<CertifiedKey> for DomainResolver {
             challenge_key: None,
             notifier: None,
         }
-    }
-}
-
-impl CertResolver {
-    pub(crate) fn create() -> (
-        CertResolver,
-        WriteHandle<String, DomainResolver, RandomState>,
-    ) {
-        let (writer, reader) = flashmap::new::<String, DomainResolver>();
-        (CertResolver { reader }, writer)
     }
 }
 
@@ -62,8 +45,7 @@ impl ResolvesServerCert for CertResolver {
             {
                 #[cfg(feature = "tracing")]
                 debug!("alpn challenge");
-                let guard = self.reader.guard();
-                if let Some(resolver) = guard.get(server_name) {
+                if let Some(resolver) = self.map.pin().get(server_name) {
                     match &resolver.challenge_key {
                         Some(key) => {
                             if let Some(ref notifier) = resolver.notifier {
@@ -77,8 +59,10 @@ impl ResolvesServerCert for CertResolver {
                     None
                 }
             } else {
-                let guard = self.reader.guard();
-                guard.get(server_name).map(|resolver| resolver.key.clone())
+                self.map
+                    .pin()
+                    .get(server_name)
+                    .map(|resolver| resolver.key.clone())
             }
         } else {
             None
