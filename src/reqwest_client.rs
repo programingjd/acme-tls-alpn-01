@@ -129,9 +129,11 @@ impl Response for reqwest::Response {
 mod test {
     use crate::client::HttpClient;
     use reqwest::Client;
+    use rustls::crypto;
 
     #[tokio::test]
     async fn test_text() {
+        crypto::ring::default_provider().install_default().unwrap();
         let client = Client::default();
         let response = client.get_request("https://www.example.com").await.unwrap();
         let text = response.text().await.unwrap();
