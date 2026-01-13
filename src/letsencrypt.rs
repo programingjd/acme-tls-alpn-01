@@ -1,3 +1,4 @@
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LetsEncrypt {
     /// [Let's Encrypt production directory](https://letsencrypt.org/getting-started/)
     ProductionEnvironment,
@@ -6,6 +7,7 @@ pub enum LetsEncrypt {
 }
 
 #[cfg(debug_assertions)]
+#[allow(clippy::derivable_impls)]
 impl Default for LetsEncrypt {
     fn default() -> Self {
         Self::StagingEnvironment
@@ -13,6 +15,7 @@ impl Default for LetsEncrypt {
 }
 
 #[cfg(not(debug_assertions))]
+#[allow(clippy::derivable_impls)]
 impl Default for LetsEncrypt {
     fn default() -> Self {
         Self::ProductionEnvironment
