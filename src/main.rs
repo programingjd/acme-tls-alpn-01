@@ -1,8 +1,9 @@
-use acme_tls_alpn_01::letsencrypt::LetsEncrypt;
+use acme_tls_alpn_01::letsencrypt::LetsEncrypt::{ProductionEnvironment, StagingEnvironment};
 use acme_tls_alpn_01::Acme;
 use clap::error::ErrorKind;
 use clap::{Arg, ArgAction, ArgGroup, Command};
 use rustls::crypto;
+use std::borrow::Cow;
 use std::env::args;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
@@ -25,27 +26,27 @@ async fn main() -> std::io::Result<()> {
             Arg::new("prod")
                 .long("prod")
                 .alias("production")
-                .help("Use production environment")
+                .help("Use Let's Encrypt production environment")
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("staging")
                 .long("staging")
-                .help("Use staging environment (default)")
+                .help("Use Let's Encrypt staging environment (default)")
                 .action(ArgAction::SetTrue)
                 .default_value("true"),
         )
         .arg(
             Arg::new("directory")
                 .long("directory")
-                .help("Use a custom directory URL")
+                .help("Use a custom ACME directory URL")
                 .value_name("url")
                 .num_args(1),
         )
         .arg(
             Arg::new("email")
                 .long("email")
-                .help("Contact email")
+                .help("Contact email (defaults to contact@{first_domain})")
                 .value_name("email")
                 .num_args(1),
         )
@@ -87,8 +88,29 @@ async fn main() -> std::io::Result<()> {
             }
         },
     };
-    let domain_names = matches.get_many::<String>("domains");
-
+    let domain_names = matches
+        .get_many::<String>("domains")
+        .expect("domains argument is required")
+        .collect::<Vec<_>>();
+    let email = matches
+        .get_one::<Cow<str>>("email")
+        .map(|it| it.clone())
+        .unwrap_or_else(|| {
+            Cow::Owned(format!(
+                "contact@{}",
+                domain_names.first().expect("domains argument is required")
+            ))
+        });
+    let directory_url = match matches.get_one::<Cow<str>>("directory") {
+        Some(url) => url.clone(),
+        None => {
+            if matches.get_flag("prod") {
+                Cow::Owned(ProductionEnvironment.directory_url())
+            } else {
+                Cow::Owned(StagingEnvironment.directory_url())
+            }
+        }
+    };
     let env_filter = if matches.get_flag("very_verbose") {
         "acme_tls_alpn_01=trace,reqwest=warn,tokio_rustls=warn,rustls=warn,off"
     } else if matches.get_flag("verbose") {
@@ -105,19 +127,14 @@ async fn main() -> std::io::Result<()> {
         .try_init()
         .expect("could not init env filter");
 
-    let domain_name: String = std::env::var("DOMAIN_NAME")
-        .unwrap_or("tunnel.programingjd.me".to_string())
-        // .expect("DOMAIN_NAME not set")
-        .to_string();
     let https_listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, 443)).await?;
     crypto::ring::default_provider()
         .install_default()
         .map_err(|_err| {
             std::io::Error::other("Could not install ring as default crypto provider.")
         })?;
-    let mut acme = Acme::<reqwest::Response, reqwest::Client>::from_domain_names(
-        vec![domain_name].into_iter(),
-    );
+    let mut acme =
+        Acme::<reqwest::Response, reqwest::Client>::from_domain_names(domain_names.into_iter());
     let resolver = acme.resolver.clone();
     let mut tls_config = ServerConfig::builder_with_protocol_versions(&[&TLS13])
         .with_no_client_auth()
@@ -155,14 +172,8 @@ async fn main() -> std::io::Result<()> {
             }
         }
     });
-    let directory = acme
-        .directory(LetsEncrypt::StagingEnvironment.directory_url())
-        .await
-        .unwrap();
-    let account = acme
-        .new_account("void@programingjd.me", &directory)
-        .await
-        .unwrap();
+    let directory = acme.directory(directory_url).await.unwrap();
+    let account = acme.new_account(email, &directory).await.unwrap();
     let certificate = acme
         .request_certificates(&account, &directory)
         .await
