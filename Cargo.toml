@@ -73,9 +73,9 @@ features = ["ring"]
 
 [dependencies.reqwest]
 optional = true
-version = "0.13"
+version = "0.12"
 default-features = false
-features = ["json", "rustls-no-provider"]
+features = ["json", "rustls-tls-webpki-roots-no-provider"]
 
 [dependencies.tracing]
 optional = true
