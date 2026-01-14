@@ -7,7 +7,7 @@ use rustls::sign::CertifiedKey;
 use std::fmt::Debug;
 use std::sync::Arc;
 #[cfg(feature = "tracing")]
-use tracing::debug;
+use tracing::{debug, trace};
 
 #[derive(Debug, Default)]
 pub struct CertResolver {
@@ -49,7 +49,13 @@ impl ResolvesServerCert for CertResolver {
                     match &resolver.challenge_key {
                         Some(key) => {
                             if let Some(ref notifier) = resolver.notifier {
-                                let _ = notifier.try_send(server_name.to_string());
+                                let _ =
+                                    notifier
+                                        .try_send(server_name.to_string())
+                                        .inspect_err(|err| {
+                                            #[cfg(feature = "tracing")]
+                                            trace!("failed to notify resolver: {}", err);
+                                        });
                             }
                             Some(key.clone())
                         }

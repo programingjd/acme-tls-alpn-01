@@ -1,6 +1,6 @@
-use crate::errors::Result;
-use crate::resolver::{create_self_signed_certificate, CertResolver, DomainResolver};
 use crate::Acme;
+use crate::errors::Result;
+use crate::resolver::{CertResolver, DomainResolver, create_self_signed_certificate};
 use rustls::sign::CertifiedKey;
 use serde::de::DeserializeOwned;
 use serde_json::Value;

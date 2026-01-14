@@ -4,7 +4,7 @@ use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::{jose, jwk};
 use rcgen::{CertificateParams, CustomExtension, KeyPair, PKCS_ECDSA_P256_SHA256};
-use ring::digest::{digest, SHA256};
+use ring::digest::{SHA256, digest};
 use rustls::crypto::ring::sign::any_supported_type;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::sign::CertifiedKey;
