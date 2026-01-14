@@ -1,6 +1,6 @@
 use crate::errors::{ErrorKind, Result};
 use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
 
 #[cfg_attr(feature = "tracing", tracing::instrument(
     name = "generate_keypair_pkcs8",

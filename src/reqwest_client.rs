@@ -1,8 +1,8 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{ErrorKind, Result};
 use futures_timer::Delay;
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::type_name;

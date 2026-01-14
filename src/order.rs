@@ -8,9 +8,9 @@ use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
 use crate::resolver::{CertResolver, DomainResolver};
 use base64::Engine;
-use futures::future::{select, Either};
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::future::{Either, select};
+use futures::stream::FuturesUnordered;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -151,7 +151,7 @@ impl LocatedOrder {
         // order status again. If it is still processing, then we
         // wait for another 2:30s and retrieve the order status one
         // last time. If it is still processing then we give up.
-        let mut delays = vec![10u64, 150u64];
+        let mut delays = vec![150u64, 10u64];
         let mut maybe_csr = None;
         loop {
             match self
@@ -343,7 +343,7 @@ impl LocatedOrder {
                 // If that's the case, we wait for 10s and check again.
                 // If the status is still pending, we wait for 2:30s and check
                 // one last time. If the status is still pending then we give up.
-                let mut delays = vec![10u64, 150u64];
+                let mut delays = vec![150u64, 10u64];
                 loop {
                     match Self::try_get(self.url.clone(), account, directory, client)
                         .await?

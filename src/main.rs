@@ -6,10 +6,12 @@ use rustls::crypto;
 use std::borrow::Cow;
 use std::env::args;
 use std::net::Ipv6Addr;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{copy, sink, split, AsyncWriteExt};
-use tokio::join;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::{fs, join};
 use tokio_rustls::rustls::server::Acceptor;
 use tokio_rustls::rustls::version::TLS13;
 use tokio_rustls::rustls::ServerConfig;
@@ -51,17 +53,18 @@ async fn main() -> std::io::Result<()> {
                 .num_args(1),
         )
         .arg(
+            Arg::new("out")
+                .short('o')
+                .long("out")
+                .help("Output pem file (defaults to stdout)")
+                .value_name("certificate.pem")
+                .num_args(1),
+        )
+        .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
                 .help("Enable verbose output")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("very_verbose")
-                .visible_alias("vv") // allows -vv
-                .long("very-verbose")
-                .help("Enable very verbose output")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -94,7 +97,7 @@ async fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>();
     let email = matches
         .get_one::<Cow<str>>("email")
-        .map(|it| it.clone())
+        .cloned()
         .unwrap_or_else(|| {
             Cow::Owned(format!(
                 "contact@{}",
@@ -111,12 +114,12 @@ async fn main() -> std::io::Result<()> {
             }
         }
     };
-    let env_filter = if matches.get_flag("very_verbose") {
-        "acme_tls_alpn_01=trace,reqwest=warn,tokio_rustls=warn,rustls=warn,off"
-    } else if matches.get_flag("verbose") {
-        "acme_tls_alpn_01=debug,reqwest=error,tokio_rustls=error,rustls=error,off"
+    let env_filter = /*if matches.get_flag("very_verbose") {
+        "acme_tls_alpn_01=trace,reqwest=info,tokio_rustls=info,rustls=info,warn"
+    } else*/ if matches.get_flag("verbose") {
+        "acme_tls_alpn_01=debug,warn"
     } else {
-        "acme_tls_alpn_01=warn,off"
+        "acme_tls_alpn_01=warn,error"
     };
 
     tracing_subscriber::fmt()
@@ -178,8 +181,18 @@ async fn main() -> std::io::Result<()> {
         .request_certificates(&account, &directory)
         .await
         .unwrap();
-    println!("{certificate}");
-    let _ = server.await;
+    if let Some(out) = matches
+        .get_one::<Cow<str>>("out")
+        .map(|it| PathBuf::from_str(&it).unwrap())
+    {
+        if let Err(err) = fs::write(&out, &certificate).await {
+            eprintln!("Failed to write certificate to {out:?}\n{err:?}");
+            println!("{certificate}");
+        }
+    } else {
+        println!("{certificate}");
+    }
+    server.abort();
     Ok(())
 }
 
