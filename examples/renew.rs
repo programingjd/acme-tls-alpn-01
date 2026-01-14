@@ -28,7 +28,7 @@ async fn main() -> std::io::Result<()> {
     let https_listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, 443)).await?;
     crypto::ring::default_provider()
         .install_default()
-        .map_err(|err| {
+        .map_err(|_err| {
             std::io::Error::other("Could not install ring as default crypto provider.")
         })?;
     let mut acme = Acme::<reqwest::Response, reqwest::Client>::from_domain_names(
