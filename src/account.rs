@@ -385,6 +385,7 @@ mod base64 {
 mod test {
     use super::*;
     use crate::ecdsa::{generate_pkcs8_ecdsa_keypair, keypair_from_pkcs8};
+    use rustls::crypto;
     use test_tracing::test;
 
     #[test]
@@ -427,6 +428,7 @@ mod test {
     #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_get_account_and_update_key() {
+        let _ = crypto::ring::default_provider().install_default();
         let acme = crate::Acme::empty();
         let directory = Directory::from(
             crate::letsencrypt::LetsEncrypt::StagingEnvironment.directory_url(),

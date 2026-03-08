@@ -10,3 +10,7 @@ Even though this should work with any ACME server, the emphasis is to have it wo
 The [TLS-ALPN-01](https://datatracker.ietf.org/doc/html/rfc8737) challenge is validated by providing a self-signed certificate during the TLS handshake. The certificate must have an [`id-pe-acmeIdentifier` extension (id 31)](https://www.iana.org/assignments/smi-numbers/smi-numbers.xhtml#table-smi-numbers-1.3.6.1.5.5.7.1) that includes the authorization key.
 
 This means that the library needs to interact with the server TLS acceptor.
+
+---
+
+This crate includes both a library and a cli binary.

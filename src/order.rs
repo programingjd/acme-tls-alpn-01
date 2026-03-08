@@ -8,9 +8,9 @@ use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::jose;
 use crate::resolver::{CertResolver, DomainResolver};
 use base64::Engine;
-use futures::StreamExt;
-use futures::future::{Either, select};
+use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use futures_timer::Delay;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -497,6 +497,7 @@ impl LocatedOrder {
 #[cfg(test)]
 mod test {
     use super::*;
+    use rustls::crypto;
     use test_tracing::test;
 
     #[test]
@@ -552,6 +553,7 @@ mod test {
     #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_new_order() {
+        let _ = crypto::ring::default_provider().install_default();
         let acme = crate::Acme::empty();
         let directory = Directory::from(
             crate::letsencrypt::LetsEncrypt::StagingEnvironment.directory_url(),
