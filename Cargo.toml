@@ -1,6 +1,6 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 authors = ["Jerome David <programingjd@gmail.com>"]
 categories = ["web-programming::http-server"]
@@ -97,7 +97,7 @@ features = ["std", "help", "usage"]
 
 [dependencies.tokio]
 optional = true
-version = "1.49"
+version = "1.50"
 default-features = false
 features = ["net", "fs", "io-util", "rt-multi-thread", "macros"]
 
@@ -108,7 +108,7 @@ default-features = false
 features = ["ring"]
 
 [dev-dependencies.tokio]
-version = "1.49"
+version = "1.50"
 default-features = false
 features = ["net", "io-util", "rt-multi-thread", "macros"]
 

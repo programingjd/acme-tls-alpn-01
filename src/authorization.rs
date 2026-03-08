@@ -84,6 +84,7 @@ mod test {
     use super::*;
     use crate::challenge::{ChallengeStatus, ChallengeType};
     use crate::order::Identifier;
+    use rustls::crypto;
     use serde_json::json;
     use test_tracing::test;
 
@@ -159,6 +160,7 @@ mod test {
     #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn test_authorize() {
+        let _ = crypto::ring::default_provider().install_default();
         let acme = crate::Acme::<reqwest::Response, reqwest::Client>::from_domain_names(
             vec!["void.programingjd.me"].into_iter(),
         );

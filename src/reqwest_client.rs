@@ -1,8 +1,8 @@
 use crate::client::{HttpClient, Response};
 use crate::errors::{ErrorKind, Result};
 use futures_timer::Delay;
-use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::type_name;
@@ -133,10 +133,16 @@ mod test {
 
     #[tokio::test]
     async fn test_text() {
-        crypto::ring::default_provider().install_default().unwrap();
+        let _ = crypto::ring::default_provider().install_default();
         let client = Client::default();
-        let response = client.get_request("https://www.example.com").await.unwrap();
+        let response = client
+            .get_request("https://void.programingjd.me")
+            .await
+            .unwrap();
         let text = response.text().await.unwrap();
-        assert!(text.starts_with("<!doctype html>"))
+        assert!(
+            text.to_ascii_lowercase().starts_with("<!doctype html>"),
+            "{text}"
+        )
     }
 }

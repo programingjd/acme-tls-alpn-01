@@ -98,6 +98,7 @@ impl Directory {
 #[cfg(test)]
 mod test {
     use crate::directory::Directory;
+    use rustls::crypto;
     use serde_json::json;
     use test_tracing::test;
 
@@ -134,6 +135,7 @@ mod test {
     #[cfg(feature = "reqwest")]
     #[test(tokio::test)]
     async fn invalid_url() {
+        let _ = crypto::ring::default_provider().install_default();
         let acme = crate::Acme::empty();
         assert!(
             acme.directory("https://nonexisting.org/acme")
@@ -144,6 +146,7 @@ mod test {
 
     #[cfg(feature = "reqwest")]
     async fn letsencrypt(environment: &crate::letsencrypt::LetsEncrypt) {
+        let _ = crypto::ring::default_provider().install_default();
         let acme = crate::Acme::empty();
         let directory = acme.directory(environment.directory_url()).await.unwrap();
         assert_eq!(
