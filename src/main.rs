@@ -1,5 +1,5 @@
-use acme_tls_alpn_01::letsencrypt::LetsEncrypt::{ProductionEnvironment, StagingEnvironment};
 use acme_tls_alpn_01::Acme;
+use acme_tls_alpn_01::letsencrypt::LetsEncrypt::{ProductionEnvironment, StagingEnvironment};
 use clap::error::ErrorKind;
 use clap::{Arg, ArgAction, ArgGroup, Command};
 use rustls::crypto;
@@ -9,14 +9,14 @@ use std::net::Ipv6Addr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::io::{copy, sink, split, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt, copy, sink, split};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::{fs, join};
+use tokio_rustls::LazyConfigAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::server::Acceptor;
 use tokio_rustls::rustls::version::TLS13;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::server::TlsStream;
-use tokio_rustls::LazyConfigAcceptor;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -183,7 +183,7 @@ async fn main() -> std::io::Result<()> {
         .unwrap();
     if let Some(out) = matches
         .get_one::<Cow<str>>("out")
-        .map(|it| PathBuf::from_str(&it).unwrap())
+        .map(|it| PathBuf::from_str(it).unwrap())
     {
         if let Err(err) = fs::write(&out, &certificate).await {
             eprintln!("Failed to write certificate to {out:?}\n{err:?}");
