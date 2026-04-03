@@ -112,6 +112,14 @@ mod test {
                     "token": "DGyRejmCefe7v4NfDGDKfA",
                 },
                 {
+                    "type": "dns-persist-01",
+                    "url": "https://example.com/acme/chall/Rg5dV14Gh1Q",
+                    "status": "pending",
+                    "issuer-domain-names": [
+                        "letsencrypt.org",
+                    ]
+                },
+                {
                     "type": "tls-alpn-01",
                     "url": "https://example.com/acme/chall/PCt92wr-oA",
                     "status": "pending",
@@ -127,13 +135,13 @@ mod test {
             deserialized.identifier,
             Identifier::Dns("www.example.org".to_string())
         );
-        assert_eq!(deserialized.challenges.len(), 3);
+        assert_eq!(deserialized.challenges.len(), 4);
         assert_eq!(
             deserialized.challenges[0],
             Challenge {
                 url: "https://example.com/acme/chall/prV_B7yEyA4".to_string(),
                 status: ChallengeStatus::Valid,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                token: Some("DGyRejmCefe7v4NfDGDKfA".to_string()),
                 kind: ChallengeType::Http01,
             }
         );
@@ -142,16 +150,25 @@ mod test {
             Challenge {
                 url: "https://example.com/acme/chall/Rg5dV14Gh1Q".to_string(),
                 status: ChallengeStatus::Pending,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                token: Some("DGyRejmCefe7v4NfDGDKfA".to_string()),
                 kind: ChallengeType::Dns01,
             }
         );
         assert_eq!(
             deserialized.challenges[2],
             Challenge {
+                url: "https://example.com/acme/chall/Rg5dV14Gh1Q".to_string(),
+                status: ChallengeStatus::Pending,
+                token: None,
+                kind: ChallengeType::DnsPersist01,
+            }
+        );
+        assert_eq!(
+            deserialized.challenges[3],
+            Challenge {
                 url: "https://example.com/acme/chall/PCt92wr-oA".to_string(),
                 status: ChallengeStatus::Pending,
-                token: "DGyRejmCefe7v4NfDGDKfA".to_string(),
+                token: Some("DGyRejmCefe7v4NfDGDKfA".to_string()),
                 kind: ChallengeType::TlsAlpn01
             }
         );

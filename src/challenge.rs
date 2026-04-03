@@ -4,7 +4,7 @@ use crate::directory::Directory;
 use crate::errors::{Error, ErrorKind, Result};
 use crate::jose::{jose, jwk};
 use rcgen::{CertificateParams, CustomExtension, KeyPair, PKCS_ECDSA_P256_SHA256};
-use ring::digest::{SHA256, digest};
+use ring::digest::{digest, SHA256};
 use rustls::crypto::ring::sign::any_supported_type;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::sign::CertifiedKey;
@@ -17,7 +17,7 @@ use tracing::debug;
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Challenge {
     pub(crate) url: String,
-    pub(crate) token: String,
+    pub(crate) token: Option<String>,
     #[serde(flatten)]
     pub(crate) status: ChallengeStatus,
     #[serde(flatten, rename = "type")]
@@ -33,6 +33,9 @@ pub(crate) enum ChallengeType {
     /// [RFC 8555 DNS Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8.4)
     #[serde(rename = "dns-01")]
     Dns01,
+    /// [Persistent DNS TXT Record Validation](https://datatracker.ietf.org/doc/html/draft-ietf-acme-dns-persist-01)
+    #[serde(rename = "dns-persist-01")]
+    DnsPersist01,
     #[serde(rename = "tls-sni-01")]
     TlsSNI01,
     #[serde(rename = "tls-sni-02")]
@@ -63,7 +66,7 @@ impl Challenge {
         let thumbprint = jwk.thumbprint();
         digest(
             &SHA256,
-            format!("{}.{}", &self.token, &thumbprint).as_bytes(),
+            format!("{}.{}", &self.token.as_ref().unwrap(), &thumbprint).as_bytes(),
         )
         .as_ref()
         .to_vec()
@@ -156,7 +159,7 @@ mod test {
             "https://example.com/acme/chall/prV_B7yEyA4"
         );
         assert_eq!(
-            deserialized.token,
+            deserialized.token.unwrap(),
             "LoqXcYV8q5ONbJQxbmR7SCTNo3tiAXDfowyjxAjEuX0"
         );
     }

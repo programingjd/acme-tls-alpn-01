@@ -3,7 +3,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
-use syn::{ItemFn, parse_macro_input};
+use syn::{parse_macro_input, ItemFn};
 
 #[proc_macro_attribute]
 pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -33,7 +33,7 @@ fn try_test(attr: TokenStream, input: ItemFn) -> syn::Result<Tokens> {
             //.pretty()
             .with_env_filter("acme_tls_alpn_01=trace")
             .without_time()
-            .with_line_number(false)
+            .with_line_number(true)
             .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW | tracing_subscriber::fmt::format::FmtSpan::CLOSE)
             .try_init()
             .expect("could not init env filter")
