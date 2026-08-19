@@ -1,6 +1,6 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 authors = ["Jerome David <programingjd@gmail.com>"]
 categories = ["web-programming::http-server"]
@@ -23,7 +23,7 @@ default-features = false
 features = ["std", "alloc"]
 
 [dependencies.base64]
-version = "0.22"
+version = "0.23"
 default-features = false
 features = ["std", "alloc"]
 
