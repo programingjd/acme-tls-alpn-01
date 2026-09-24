@@ -7,7 +7,6 @@ use std::borrow::Cow;
 use std::env::args;
 use std::net::Ipv6Addr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, copy, sink, split};
 use tokio::net::{TcpListener, TcpStream};
@@ -96,15 +95,18 @@ async fn main() -> std::io::Result<()> {
         .expect("domains argument is required")
         .collect::<Vec<_>>();
     let email = matches
-        .get_one::<Cow<str>>("email")
-        .cloned()
+        .get_one::<String>("email")
+        .map(|it| it.into())
         .unwrap_or_else(|| {
             Cow::Owned(format!(
                 "contact@{}",
                 domain_names.first().expect("domains argument is required")
             ))
         });
-    let directory_url = match matches.get_one::<Cow<str>>("directory") {
+    let directory_url = match matches
+        .get_one::<String>("directory")
+        .map(|it| Cow::Borrowed(it.as_str()))
+    {
         Some(url) => url.clone(),
         None => {
             if matches.get_flag("prod") {
@@ -181,10 +183,7 @@ async fn main() -> std::io::Result<()> {
         .request_certificates(&account, &directory)
         .await
         .unwrap();
-    if let Some(out) = matches
-        .get_one::<Cow<str>>("out")
-        .map(|it| PathBuf::from_str(it).unwrap())
-    {
+    if let Some(out) = matches.get_one::<PathBuf>("out") {
         if let Err(err) = fs::write(&out, &certificate).await {
             eprintln!("Failed to write certificate to {out:?}\n{err:?}");
             println!("{certificate}");
