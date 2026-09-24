@@ -6,7 +6,6 @@ use rustls::crypto;
 use std::borrow::Cow;
 use std::env::args;
 use std::net::Ipv6Addr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, copy, sink, split};
 use tokio::net::{TcpListener, TcpStream};
@@ -183,7 +182,7 @@ async fn main() -> std::io::Result<()> {
         .request_certificates(&account, &directory)
         .await
         .unwrap();
-    if let Some(out) = matches.get_one::<PathBuf>("out") {
+    if let Some(out) = matches.get_one::<String>("out") {
         if let Err(err) = fs::write(&out, &certificate).await {
             eprintln!("Failed to write certificate to {out:?}\n{err:?}");
             println!("{certificate}");
