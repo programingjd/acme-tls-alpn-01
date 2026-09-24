@@ -1,6 +1,6 @@
 [package]
 name = "acme-tls-alpn-01"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 authors = ["Jerome David <programingjd@gmail.com>"]
 categories = ["web-programming::http-server"]
